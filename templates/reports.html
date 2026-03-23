@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Reports - Shop Manager</title>
+    <style>
+        /* Core Layout */
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; display: flex; height: 100vh; background: #f0f2f5; }
+        .sidebar { width: 250px; background: #2c3e50; color: white; padding: 20px; flex-shrink: 0; }
+        .main-content { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
+        
+        /* Typography & Links */
+        .sidebar h3 { color: #ecf0f1; margin-bottom: 20px; }
+        .sidebar a { color: white; text-decoration: none; transition: 0.2s; display: block; padding: 10px 0; }
+        .sidebar a:hover { color: #3498db; }
+        
+        .sub-header { background: #fff; padding: 15px 40px; font-weight: bold; border-bottom: 1px solid #ddd; color: #2c3e50; display: flex; justify-content: space-between; align-items: center; }
+
+        /* Report Specifics */
+        .report-container { padding: 30px; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 25px; }
+        
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 15px; border-bottom: 1px solid #eee; text-align: left; }
+        th { background: #f8f9fa; color: #7f8c8d; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+        
+        .btn { padding: 10px 15px; border: none; border-radius: 4px; color: white; cursor: pointer; text-decoration: none; font-size: 13px; font-weight: bold; }
+
+        /* Toggle Logic */
+        .report-section { display: none; }
+        .active-report { display: block; animation: fadeIn 0.3s; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        select { padding: 10px; border-radius: 4px; border: 1px solid #ddd; width: 250px; outline: none; }
+
+        /* Print Styles */
+        @media print {
+            body * { visibility: hidden; }
+            #daily-summary-print, #daily-summary-print * { visibility: visible; }
+            #daily-summary-print { position: absolute; left: 0; top: 0; display: block !important; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="sidebar">
+        <h3>Financial Report</h3>
+        <hr>
+        <a href="/dashboard">🏠 POS Dashboard</a>
+        <a href="/inventory">📦 Inventory</a>
+
+        {% if session['role'] == 'Admin' %}
+            <a href="/cash">💰 Cash Management</a>
+            <a href="/sales">📊 Sales History</a>
+            <a href="/register">👤 Register Staff</a>
+        {% endif %}
+
+        <hr style="opacity: 0.3;">
+        <a href="/change_password">🔒 Change Password</a>
+        <a href="/logout" style="color:#ff7675;">Logout</a>
+    </div>
+
+    <div class="main-content">
+        <div class="sub-header">
+            <span>Financial Performance Summaries</span>
+            <button id="printBtn" onclick="window.print()" class="btn" style="background: #2c3e50; display: flex; align-items: center; gap: 8px;">
+                🖨️ Print Daily Summary
+            </button>
+        </div>
+
+        <div class="report-container">
+            <div id="daily-summary-print" style="display: none; font-family: 'Courier New', monospace; width: 80mm; padding: 10px; border: 1px solid #000;">
+                <center>
+                    <h2 style="margin:0;">{{ shop_info.shop_name if shop_info else 'Shop Manager' }}</h2>
+                    <p>DAILY FINANCIAL SUMMARY</p>
+                    <p>Date: {{ current_date }}</p>
+                    <p>--------------------------------</p>
+                </center>
+                <div style="display: flex; justify-content: space-between;">
+                    <span>Total Sales (In):</span>
+                    <span>GHS {{ "{:.2f}".format(total_in if total_in else 0) }}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span>Total Expenses (Out):</span>
+                    <span>GHS {{ "{:.2f}".format(total_out if total_out else 0) }}</span>
+                </div>
+                <p>--------------------------------</p>
+                <div style="display: flex; justify-content: space-between; font-weight: bold;">
+                    <span>NET CASH:</span>
+                    <span>GHS {{ "{:.2f}".format(balance if balance else 0) }}</span>
+                </div>
+                <br><br>
+                <p>Signature: ____________________</p>
+                <center><p>End of Report</p></center>
+            </div>
+
+            <div class="report-chooser card">
+                <label for="reportType"><strong>📅 View Report For:</strong></label><br><br>
+                <select id="reportType" onchange="switchReport()">
+                    <option value="daily">Recent Daily Sales</option>
+                    <option value="monthly">Monthly Totals</option>
+                    <option value="yearly">Yearly Breakdown (Monthly)</option>
+                </select>
+            </div>
+
+            <div id="dailySection" class="report-section active-report">
+                <div class="card">
+                    <h3>📈 Daily Sales (Last 30 Days)</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Date</th><th>Transactions</th><th>Revenue</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for d in daily %}
+                            <tr>
+                                <td>{{ d['day'] }}</td>
+                                <td>{{ d['count'] }}</td>
+                                <td><strong>GHS {{ "{:.2f}".format(d['total']) }}</strong></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="monthlySection" class="report-section">
+                <div class="card">
+                    <h3>📊 Monthly Summaries</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Year-Month</th><th>Total Revenue</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for m in monthly %}
+                            <tr>
+                                <td>{{ m['month'] }}</td>
+                                <td><strong>GHS {{ "{:.2f}".format(m['total']) }}</strong></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div id="yearlySection" class="report-section">
+                <div class="card">
+                    <h3>🗓️ Yearly Breakdown by Month</h3>
+                    <table>
+                        <thead>
+                            <tr><th>Year</th><th>Month</th><th>Revenue</th></tr>
+                        </thead>
+                        <tbody>
+                            {% for y in yearly %}
+                            <tr>
+                                <td><strong>{{ y['year'] }}</strong></td>
+                                <td>{{ y['month_name'] }}</td>
+                                <td><strong>GHS {{ "{:.2f}".format(y['total']) }}</strong></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function switchReport() {
+            const selected = document.getElementById('reportType').value;
+            
+            // Hide all sections
+            document.querySelectorAll('.report-section').forEach(sec => {
+                sec.classList.remove('active-report');
+            });
+            
+            // Show the selected one
+            document.getElementById(selected + 'Section').classList.add('active-report');
+
+            // Hide print button if not on daily report
+            const printBtn = document.getElementById('printBtn');
+            if (selected === 'daily') {
+                printBtn.style.display = 'flex';
+            } else {
+                printBtn.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>

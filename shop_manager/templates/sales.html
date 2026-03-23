@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Sales Report</title>
+    <style>
+        body { font-family: sans-serif; margin: 40px; max-width: 900px; margin: auto; line-height: 1.6; }
+        .nav { margin-bottom: 20px; }
+        .summary-banner { background: #2196F3; color: white; padding: 20px; border-radius: 8px; margin-bottom: 30px; text-align: center; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        tr:hover { background-color: #f9f9f9; }
+        .btn { padding: 8px 16px; text-decoration: none; border-radius: 4px; color: white; background: #333; display: inline-block; }
+    </style>
+</head>
+<body>
+    <div class="nav">
+        <a href="{{ url_for('index') }}" class="btn">← Back to Inventory</a>
+    </div>
+
+    <h1>Sales History</h1>
+
+    <div class="summary-banner">
+        <h2 style="margin:0;">Total Lifetime Revenue</h2>
+        <p style="font-size: 2em; margin: 10px 0;">${{ "{:.2f}".format(total_revenue) }}</p>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Product Name</th>
+                <th>Price Sold</th>
+                <th>Date & Time</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for sale in sales %}
+            <tr>
+                <td>#{{ sale['id'] }}</td>
+                <td><strong>{{ sale['name'] }}</strong></td>
+                <td>${{ "{:.2f}".format(sale['total_price']) }}</td>
+                <td>{{ sale['timestamp'] }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" style="text-align:center;">No sales recorded yet.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

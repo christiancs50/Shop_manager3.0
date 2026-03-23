@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Manage Staff</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; height: 100vh; background: #f0f2f5; }
+        .sidebar { width: 250px; background: #2c3e50; color: white; padding: 20px; }
+        .main { flex: 1; padding: 40px; overflow-y: auto; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; }
+        th { background: #34495e; color: white; }
+        .btn-del { color: #e74c3c; text-decoration: none; font-weight: bold; border: 1px solid #e74c3c; padding: 5px 10px; border-radius: 4px; }
+        .btn-del:hover { background: #e74c3c; color: white; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .bg-admin { background: #ebf5fb; color: #2980b9; }
+        .bg-staff { background: #fef9e7; color: #f39c12; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h3>POS SYSTEM</h3>
+        <hr>
+        <a href="/dashboard" style="color:white; text-decoration: none;"><p>🏠 Dashboard</p></a>
+        <a href="/inventory" style="color:white; text-decoration: none;"><p>📦 Inventory</p></a>
+        <a href="/register" style="color:white; text-decoration: none;"><p>👤 Add New Staff</p></a>
+        <hr>
+        <a href="/logout" style="color:#ff7675; text-decoration: none;">Logout</a>
+    </div>
+
+    <div class="main">
+        <h1>Staff Management</h1>
+        
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            {% for message in messages %}
+              <div style="padding: 10px; background: #d4efdf; color: #27ae60; margin-bottom: 20px; border-radius: 4px;">
+                {{ message }}
+              </div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <div class="card">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Role</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for user in users %}
+                    <tr>
+                        <td><strong>{{ user.username }}</strong></td>
+                        <td>
+                            <span class="badge {{ 'bg-admin' if user.role == 'Admin' else 'bg-staff' }}">
+                                {{ user.role }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if user.username != 'admin' %}
+                                <a href="{{ url_for('delete_user', id=user.id) }}" class="btn-del" onclick="return confirm('Remove access for this user?')">Remove</a>
+                            {% else %}
+                                <small style="color: #bdc3c7;">System Admin</small>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>

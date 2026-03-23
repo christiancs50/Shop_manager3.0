@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Register Staff</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; height: 100vh; background: #f0f2f5; }
+        .sidebar { width: 250px; background: #2c3e50; color: white; padding: 20px; }
+        .main { flex: 1; padding: 40px; display: flex; justify-content: center; align-items: flex-start; }
+        .card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 400px; }
+        input, select, button { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 16px; }
+        button { background: #27ae60; color: white; border: none; font-weight: bold; cursor: pointer; transition: background 0.3s; }
+        button:hover { background: #219150; }
+        .msg { padding: 10px; margin-bottom: 10px; border-radius: 4px; text-align: center; font-size: 14px; }
+        .error { background: #fadbd8; color: #e74c3c; }
+        .success { background: #d4efdf; color: #27ae60; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h3>POS SYSTEM</h3>
+        <hr>
+        <a href="/dashboard" style="color:white; text-decoration: none;"><p>🏠 POS Dashboard</p></a>
+        <a href="/inventory" style="color:white; text-decoration: none;"><p>📦 Inventory</p></a>
+        <hr>
+        <a href="/logout" style="color:#ff7675; text-decoration: none;">Logout</a>
+    </div>
+
+    <div class="main">
+        <div class="card">
+            <h2 style="text-align: center; color: #2c3e50;">Register New Staff</h2>
+            <p style="text-align: center; color: #7f8c8d; font-size: 14px;">Create accounts for your shop attendants</p>
+            
+            {% with messages = get_flashed_messages() %}
+                {% if messages %}
+                    <div class="msg {{ 'success' if 'successfully' in messages[0] else 'error' }}">
+                        {{ messages[0] }}
+                    </div>
+                {% endif %}
+            {% endwith %}
+
+            <form action="/register" method="POST">
+                <label>Username / Full Name</label>
+                <input type="text" name="username" placeholder="e.g. Kwesi_Mensah" required>
+                
+                <label>System Password</label>
+                <input type="password" name="password" placeholder="Create a temporary password" required>
+                
+                <label>Access Level</label>
+                <select name="role">
+                    <option value="Cashier">Cashier (View Stock & Sell Only)</option>
+                    <option value="Admin">Admin (Full System Access)</option>
+                </select>
+                
+                <button type="submit">CREATE STAFF ACCOUNT</button>
+            </form>
+            
+            <a href="/inventory" style="display: block; text-align: center; margin-top: 15px; color: #7f8c8d; text-decoration: none; font-size: 13px;">← Back to Inventory</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>POS Terminal - Shop Manager</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: #f0f2f5; color: #333; padding-bottom: 60px; }
+        
+        /* BRAND HEADER */
+        .brand-header { 
+            background: #005699; color: white; padding: 10px 25px; 
+            display: flex; justify-content: space-between; align-items: center; 
+        }
+        .brand-header h1 { margin: 0; font-size: 20px; text-transform: uppercase; letter-spacing: 1px; }
+
+        /* TOOLBAR */
+        .toolbar { 
+            background: #00AEEF; color: white; padding: 10px 25px; 
+            display: flex; justify-content: space-between; align-items: center; 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        /* DROPDOWN MENU */
+        .dropdown { position: relative; display: inline-block; }
+        .dropdown-content {
+            display: none; position: absolute; background-color: white; 
+            min-width: 200px; box-shadow: 0px 8px 16px rgba(0,0,0,0.2); 
+            z-index: 1000; border-radius: 4px; right: 0;
+        }
+        .dropdown-content a {
+            color: #333; padding: 12px 16px; text-decoration: none; 
+            display: block; font-size: 14px; border-bottom: 1px solid #eee;
+        }
+        .dropdown-content a:hover { background-color: #f1f1f1; color: #00AEEF; }
+        .dropdown:hover .dropdown-content { display: block; }
+
+        /* SEARCH & POS LAYOUT */
+        .search-container { position: relative; width: 400px; }
+        #productSearch { width: 100%; padding: 12px; border: none; border-radius: 4px; outline: none; font-size: 16px; }
+        .search-results { 
+            position: absolute; background: white; width: 100%; border: 1px solid #ddd; 
+            z-index: 100; max-height: 250px; overflow-y: auto; color: #333; margin-top: 5px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .search-item { padding: 12px; cursor: pointer; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
+        .search-item:hover { background: #f9f9f9; }
+        
+        .main { padding: 20px; max-width: 1400px; margin: auto; }
+        .pos-container { display: flex; gap: 20px; height: 70vh; align-items: stretch; }
+        .cart-box { flex: 3; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); display: flex; flex-direction: column; }
+        
+        /* TABLES */
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 12px; border-bottom: 2px solid #eee; color: #7f8c8d; text-transform: uppercase; font-size: 12px; }
+        td { padding: 12px; border-bottom: 1px solid #eee; }
+        .qty-input { width: 60px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; text-align: center; }
+
+        /* SUMMARY STYLING */
+        .summary-section { border-top: 2px solid #2c3e50; padding-top: 15px; margin-top: auto; }
+        .summary-row { display: flex; justify-content: flex-end; gap: 50px; padding: 5px 0; }
+        .summary-label { color: #7f8c8d; font-weight: bold; width: 120px; }
+        .summary-value { font-weight: bold; text-align: right; min-width: 100px; }
+
+        /* ACTION SIDEBAR */
+        .action-sidebar { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+        .btn { padding: 15px; border: none; border-radius: 6px; color: white; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 14px; text-transform: uppercase; }
+        .btn-settle { background: #27ae60; height: 80px; font-size: 18px; }
+        .btn-settle:hover { background: #219150; }
+        .btn-discount { background: #f39c12; }
+        .btn-clear { background: #e74c3c; }
+        .btn-view { background: #2980b9; }
+
+        .admin-vat-box { background: #f9fcff; padding: 15px; border-radius: 8px; border: 1px dashed #3498db; margin-top: auto; }
+        .vat-controls { display: flex; gap: 5px; margin-top: 8px; }
+        .vat-controls input { width: 60px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; }
+
+        footer { 
+            background: #2c3e50; color: white; padding: 8px 25px; 
+            position: fixed; bottom: 0; width: 100%; 
+            display: flex; justify-content: space-between; 
+            font-size: 13px; box-sizing: border-box; z-index: 1001;
+        }
+
+        /* PRINT STYLES */
+        #receipt-print { display: none; width: 80mm; font-family: 'Courier New', monospace; padding: 10px; color: #000; }
+        @media print {
+            body * { visibility: hidden; }
+            #receipt-print, #receipt-print * { visibility: visible; }
+            #receipt-print { position: absolute; left: 0; top: 0; display: block !important; }
+        }
+    </style>
+</head>
+<body>
+
+    <div style="background: white; padding: 15px 25px; border-radius: 0 0 10px 10px; margin-bottom: 10px; display: flex; align-items: center; box-shadow: 0 2px 10px rgba(0,0,0,0.05); border-left: 5px solid #005699;">
+        <div style="width: 50px; height: 50px; background: #eee; border-radius: 8px; overflow: hidden; margin-right: 15px; display: flex; align-items: center; justify-content: center;">
+            {% if shop_info.logo_path and shop_info.logo_path != 'default_logo.png' %}
+                <img src="{{ url_for('static', filename='uploads/' + shop_info.logo_path) }}" style="width: 100%; height: 100%; object-fit: cover;">
+            {% else %}
+                <span style="font-size: 25px;">🏬</span>
+            {% endif %}
+        </div>
+        <div>
+            <h2 style="margin: 0; font-size: 20px; color: #2c3e50;">{{ shop_info.shop_name }}</h2>
+            <span style="font-size: 11px; color: #7f8c8d; text-transform: uppercase; letter-spacing: 1px;">
+                Terminal ACC-POS-01 | {{ role }}
+            </span>
+        </div>
+    </div>
+
+    <div class="brand-header">
+        <h1>Shop Manager</h1>
+        <div style="font-size: 14px;">User: <strong style="color: #ffcc00;">{{ user }}</strong></div>
+    </div>
+
+    <div class="toolbar">
+        <div class="search-container">
+            <input type="text" id="productSearch" placeholder="🔍 Search product or scan..." onkeyup="searchProduct()" autocomplete="off">
+            <div id="searchResults" class="search-results" style="display:none;"></div>
+        </div>
+        <div style="font-size: 1.8em; font-weight: bold;">
+            GHS <span id="top-total">0.00</span>
+        </div>
+        <div class="dropdown">
+            <a href="#" style="text-decoration: none; color: white; background: rgba(255,255,255,0.2); padding: 8px 15px; border-radius: 4px; font-weight: bold;">📂 MENU ▼</a>
+            <div class="dropdown-content">
+                <a href="/inventory">📦 Stock Management</a>
+                {% if role == 'Admin' %}
+                    <a href="/reports">📊 Financial Reports</a>
+                    <a href="/cash">💰 Cash Logs</a>
+                {% endif %}
+                <a href="/logout" style="color: #e74c3c; font-weight: bold;">🚪 Logout</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="main">
+        <div class="pos-container">
+            <div class="cart-box">
+                <div style="flex-grow: 1; overflow-y: auto;">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Product</th>
+                                <th>Price</th>
+                                <th>Qty</th>
+                                <th>Total</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="cart-body"></tbody>
+                    </table>
+                </div>
+
+                <div class="summary-section">
+                    <div class="summary-row">
+                        <span class="summary-label">Subtotal:</span>
+                        <span class="summary-value" id="summary-subtotal">GHS 0.00</span>
+                    </div>
+                    <div class="summary-row">
+                        <span class="summary-label">VAT (<span id="vat-rate-label">15</span>%):</span>
+                        <span class="summary-value" id="summary-vat">GHS 0.00</span>
+                    </div>
+                    <div class="summary-row" id="discount-row" style="display:none; color: #e67e22;">
+                        <span class="summary-label">Discount:</span>
+                        <span class="summary-value" id="summary-discount">-GHS 0.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="action-sidebar">
+                <button class="btn btn-settle" onclick="settle()">SETTLE PAYMENT</button>
+                <button class="btn btn-discount" onclick="addDiscount()">Add Discount</button>
+                <button class="btn btn-clear" onclick="clearCart()">Clear Cart</button>
+                <button class="btn" onclick="window.location.href='/reports/daily_items'" style="background: #6610f2;">
+        📋 Daily Items Sold
+    </button>
+                
+                {% if role == 'Admin' %}
+                <div class="admin-vat-box">
+                    <strong style="font-size: 11px; color: #005699;">VAT CONFIG</strong>
+                    <div class="vat-controls">
+                        <input type="number" id="vatInput" value="15" step="0.1" min="0">
+                        <button onclick="updateVat()" style="background:#3498db; border:none; color:white; padding:5px; border-radius:4px; cursor:pointer;">SET</button>
+                        <button onclick="removeVat()" style="background:#e74c3c; border:none; color:white; padding:5px; border-radius:4px; cursor:pointer;">OFF</button>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div style="background: #fff; padding: 12px; border-radius: 8px; border: 1px solid #ddd; font-size: 12px;">
+                    <p style="margin: 0;"><strong>Location:</strong> Tema Store</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>
+        <div>Status: <strong style="color: #2ecc71;">● Online</strong></div>
+        <div id="clock-display">Loading...</div>
+    </footer>
+
+    <div id="receipt-print">
+        <div style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 10px; margin-bottom: 10px;">
+            <h2 style="margin:0;">{{ shop_info.shop_name }}</h2>
+            <p style="margin: 5px 0; font-size: 12px;">Tema, Ghana | POS-01</p>
+            <p style="margin: 0; font-size: 12px;" id="r-date"></p>
+        </div>
+        <div style="font-size: 12px; margin-bottom: 5px;"><strong>Trans ID:</strong> <span id="r-id"></span></div>
+        <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+            <thead><tr style="border-bottom: 1px solid #000;"><th style="text-align: left;">Item</th><th style="text-align: right;">Total</th></tr></thead>
+            <tbody id="r-items-list"></tbody>
+        </table>
+        <div style="margin-top: 10px; border-top: 1px dashed #000; padding-top: 5px; font-size: 12px;">
+            <div style="display: flex; justify-content: space-between;"><span>Subtotal:</span><span>GHS <span id="r-subtotal"></span></span></div>
+            <div style="display: flex; justify-content: space-between;"><span>VAT (<span id="r-vat-rate"></span>%):</span><span>GHS <span id="r-vat-amount"></span></span></div>
+            <div id="r-discount-row-print" style="display: none; justify-content: space-between;"><span>Discount:</span><span>-GHS <span id="r-discount"></span></span></div>
+            <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 14px; margin-top: 5px;"><span>TOTAL:</span><span>GHS <span id="r-total"></span></span></div>
+        </div>
+        <div style="text-align: center; margin-top: 20px; font-size: 11px;"><p>Thank you for shopping!</p></div>
+    </div>
+
+    <script>
+        const CURRENCY = "GHS ";
+        let cart = [];
+        let discount = 0;
+        let currentVatPercent = 15;
+        
+        // Product loading from Flask
+        let products = {{ products|tojson|safe if products else '[]' }};
+
+        const el = id => document.getElementById(id);
+
+        /* CLOCK */
+        function updateClock() {
+            const now = new Date();
+            el('clock-display').innerText = `${now.toLocaleDateString('en-GB')} | ${now.toLocaleTimeString('en-GB')}`;
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        /* VAT LOGIC */
+        function updateVat() {
+            const val = parseFloat(el('vatInput').value);
+            currentVatPercent = (!isNaN(val) && val >= 0) ? val : 0;
+            el('vat-rate-label').innerText = currentVatPercent;
+            renderCart();
+        }
+        function removeVat() {
+            currentVatPercent = 0;
+            el('vatInput').value = 0;
+            el('vat-rate-label').innerText = "0";
+            renderCart();
+        }
+
+        /* DISCOUNT LOGIC */
+        function addDiscount() {
+            const val = prompt("Enter discount amount (GHS):", "0");
+            if (val === null) return;
+            const parsed = parseFloat(val);
+            if (isNaN(parsed) || parsed < 0) return alert("Invalid amount");
+            discount = parsed;
+            renderCart();
+        }
+
+        /* SEARCH LOGIC */
+        function searchProduct() {
+            const input = el('productSearch').value.toLowerCase();
+            const results = el('searchResults');
+            if (!input) { results.style.display = 'none'; return; }
+
+            const filtered = products.filter(p => p.name.toLowerCase().includes(input));
+            results.innerHTML = '';
+            filtered.forEach(p => {
+                const div = document.createElement('div');
+                div.className = "search-item";
+                div.innerHTML = `<span>${p.name}</span><strong>${CURRENCY}${p.sell_price.toFixed(2)}</strong>`;
+                div.onclick = () => addToCart(p);
+                results.appendChild(div);
+            });
+            results.style.display = filtered.length ? 'block' : 'none';
+        }
+
+        /* CART LOGIC */
+        function addToCart(product) {
+            const existing = cart.find(i => i.id === product.id);
+            if (existing) existing.qty++;
+            else cart.push({ ...product, qty: 1 });
+            el('searchResults').style.display = 'none';
+            el('productSearch').value = '';
+            renderCart();
+        }
+
+        function updateQty(index, val) {
+            const n = parseInt(val);
+            if (n > 0) { cart[index].qty = n; renderCart(); }
+        }
+
+        function removeItem(index) {
+            cart.splice(index, 1);
+            renderCart();
+        }
+
+        function clearCart() {
+            if (confirm("Clear current transaction?")) {
+                cart = []; discount = 0; renderCart();
+            }
+        }
+
+        function renderCart() {
+            let subtotal = 0;
+            let html = '';
+            cart.forEach((item, i) => {
+                const rowTotal = item.sell_price * item.qty;
+                subtotal += rowTotal;
+                html += `<tr>
+                    <td><strong>${item.name}</strong></td>
+                    <td>${item.sell_price.toFixed(2)}</td>
+                    <td><input type="number" class="qty-input" min="1" value="${item.qty}" onchange="updateQty(${i}, this.value)"></td>
+                    <td>${rowTotal.toFixed(2)}</td>
+                    <td><button onclick="removeItem(${i})" style="color:red; border:none; background:none; cursor:pointer; font-weight:bold;">✕</button></td>
+                </tr>`;
+            });
+
+            const vat = +(subtotal * currentVatPercent / 100).toFixed(2);
+            const total = Math.max(0, subtotal + vat - discount);
+
+            el('cart-body').innerHTML = html;
+            el('summary-subtotal').innerText = `${CURRENCY}${subtotal.toFixed(2)}`;
+            el('summary-vat').innerText = `${CURRENCY}${vat.toFixed(2)}`;
+            el('top-total').innerText = total.toFixed(2);
+
+            if (discount > 0) {
+                el('discount-row').style.display = 'flex';
+                el('summary-discount').innerText = `-${CURRENCY}${discount.toFixed(2)}`;
+            } else {
+                el('discount-row').style.display = 'none';
+            }
+        }
+
+        /* SETTLE PAYMENT */
+        function settle() {
+            if (!cart.length) return alert("Cart is empty");
+
+            const subtotalVal = cart.reduce((acc, item) => acc + (item.sell_price * item.qty), 0);
+            const vatVal = +(subtotalVal * currentVatPercent / 100).toFixed(2);
+            const finalTotal = (subtotalVal + vatVal - discount).toFixed(2);
+
+            fetch('/settle_payment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    cart: cart.map(i => ({ id: i.id, qty: i.qty })),
+                    vat_percent: currentVatPercent,
+                    discount: discount,
+                    grand_total: finalTotal
+                })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    // Populate Receipt IDs correctly
+                    el('r-id').innerText = data.trans_id || "N/A";
+                    el('r-date').innerText = new Date().toLocaleString('en-GB');
+                    el('r-subtotal').innerText = subtotalVal.toFixed(2);
+                    el('r-vat-rate').innerText = currentVatPercent;
+                    el('r-vat-amount').innerText = vatVal.toFixed(2);
+                    el('r-total').innerText = finalTotal;
+
+                    if (discount > 0) {
+                        el('r-discount-row-print').style.display = 'flex';
+                        el('r-discount').innerText = discount.toFixed(2);
+                    } else {
+                        el('r-discount-row-print').style.display = 'none';
+                    }
+
+                    let itemsHtml = '';
+                    cart.forEach(item => {
+                        itemsHtml += `<tr><td>${item.name} x${item.qty}</td><td style="text-align:right;">${(item.sell_price * item.qty).toFixed(2)}</td></tr>`;
+                    });
+                    el('r-items-list').innerHTML = itemsHtml;
+
+                    window.print();
+                    alert("Success! Sale recorded.");
+                    location.reload(); 
+                } else {
+                    alert("Error: " + data.message);
+                }
+            })
+            .catch(err => alert("Network Error: Is the server running?"));
+        }
+
+        /* KEYBOARD SHORTCUTS */
+        document.addEventListener('keydown', e => {
+            if (e.key === "F2") { e.preventDefault(); el('productSearch').focus(); }
+            if (e.key === "Enter" && cart.length && document.activeElement.id !== 'productSearch') { settle(); }
+        });
+    </script>
+</body>
+</html>
