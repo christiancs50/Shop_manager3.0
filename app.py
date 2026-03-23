@@ -1,18 +1,23 @@
-from flask import Flask, render_template, request, redirect, url_for, g, session, jsonify, flash, Response
-import sqlite3
 import os
-import csv
-import io
-from functools import wraps
-from werkzeug.security import generate_password_hash, check_password_hash
-from werkzeug.utils import secure_filename
+import sqlite3
 from datetime import datetime, date
+from functools import wraps
+from dotenv import load_dotenv  # Ensure you ran 'pip install python-dotenv'
+from flask import Flask, render_template, request, redirect, url_for, g, session, jsonify, flash, Response
+from werkzeug.security import generate_password_hash, check_password_hash
+
+# 1. Load environment variables FIRST
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = 'pos-system-secret-key' 
-DATABASE = 'database.db'
+
+# 2. Use os.getenv to pull from .env. 
+# We REMOVE the hardcoded 'pos-system-secret-key' line.
+app.secret_key = os.getenv('FLASK_SECRET_KEY', 'default-dev-key-123')
+DATABASE = os.getenv('DATABASE_URL', 'database.db')
 UPLOAD_FOLDER = 'static/uploads'
 
+# 3. Create upload folder if missing
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
@@ -21,6 +26,7 @@ def get_db():
     if 'db' not in g:
         g.db = sqlite3.connect(DATABASE)
         g.db.row_factory = sqlite3.Row
+        g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
 
 @app.teardown_appcontext
@@ -32,12 +38,12 @@ def close_connection(exception):
 def init_db():
     with app.app_context():
         db = get_db()
-        # Create Tables
+        
         db.execute('''CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
             name TEXT NOT NULL, 
             sell_price REAL NOT NULL, 
-            quantity INTEGER NOT NULL,
+            quantity INTEGER NOT NULL CHECK(quantity >= 0),
             min_stock_level INTEGER DEFAULT 5,
             date_added DATETIME DEFAULT CURRENT_TIMESTAMP)''')
             
@@ -49,7 +55,8 @@ def init_db():
             grand_total REAL DEFAULT 0.0,
             vat_amount REAL DEFAULT 0.0,
             discount REAL DEFAULT 0.0,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE RESTRICT)''')
             
         db.execute('''CREATE TABLE IF NOT EXISTS cash_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -69,25 +76,22 @@ def init_db():
             shop_name TEXT,
             logo_path TEXT)''')
         
-        # MIGRATIONS: Ensures your DB has the columns that caused the "OperationalError"
-        columns_to_add = [
-            ("sales", "grand_total", "REAL DEFAULT 0.0"),
-            ("sales", "vat_amount", "REAL DEFAULT 0.0"),
-            ("sales", "discount", "REAL DEFAULT 0.0"),
-            ("sales", "quantity", "INTEGER DEFAULT 1"),
-            ("products", "min_stock_level", "INTEGER DEFAULT 5")
-        ]
-        for table, col, col_type in columns_to_add:
-            try:
-                db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
-            except sqlite3.OperationalError:
-                pass 
-
-        # Default Admin
-        admin_check = db.execute("SELECT * FROM users WHERE username = 'admin'").fetchone()
-        if not admin_check:
+        db.execute('''CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, 
+            name TEXT NOT NULL, 
+            category TEXT DEFAULT 'General',     -- New: For filtering
+            sell_price REAL NOT NULL, 
+            quantity INTEGER NOT NULL CHECK(quantity >= 0), 
+            is_active INTEGER DEFAULT 1,         -- New: 1 = Active, 0 = Deleted
+            min_stock_level INTEGER DEFAULT 5,
+            date_added DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        
+        if not db.execute("SELECT * FROM users WHERE username = 'admin'").fetchone():
             db.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
                        ("admin", generate_password_hash("admin123"), "Admin"))
+
+        if not db.execute("SELECT * FROM shop_settings WHERE id = 1").fetchone():
+            db.execute("INSERT INTO shop_settings (id, shop_name, logo_path) VALUES (1, 'My Shop', 'default_logo.png')")
 
         db.commit()
 
@@ -145,41 +149,70 @@ def dashboard():
                            shop_info=dict(shop_info) if shop_info else {"shop_name": "My Shop"}, 
                            products=[dict(p) for p in products])
 
+
 @app.route("/settle_payment", methods=["POST"])
 @login_required
 def settle_payment():
     data = request.json
     db = get_db()
     try:
+        # Start the transaction to ensure all-or-nothing logic
         db.execute("BEGIN")
+        
         subtotal = 0
         cart_items = []
 
         for item in data['cart']:
-            prod = db.execute("SELECT sell_price, quantity FROM products WHERE id=?", (item['id'],)).fetchone()
-            if not prod or prod['quantity'] < item['qty']:
-                raise Exception(f"Low stock for item ID {item['id']}")
+            # 1. Fetch price and current stock
+            prod = db.execute("SELECT name, sell_price, quantity FROM products WHERE id=?", (item['id'],)).fetchone()
+            
+            if not prod:
+                raise Exception(f"Item ID {item['id']} not found.")
+            
+            # 2. Check if enough stock exists before updating
+            if prod['quantity'] < item['qty']:
+                raise Exception(f"Low stock for {prod['name']} (Available: {prod['quantity']})")
+            
+            # 3. Deduct stock (This will also trigger the CHECK constraint if quantity < 0)
+            db.execute("UPDATE products SET quantity = quantity - ? WHERE id=?", 
+                       (item['qty'], item['id']))
             
             line_price = prod['sell_price'] * item['qty']
             subtotal += line_price
             cart_items.append((item['id'], item['qty'], line_price))
 
-        vat = subtotal * (data.get('vat_percent', 0) / 100)
-        disc = data.get('discount', 0)
-        final_total = subtotal + vat - disc
+        # 4. Calculate Totals
+        vat_percent = data.get('vat_percent', 0)
+        vat_amount = subtotal * (vat_percent / 100)
+        discount = data.get('discount', 0)
+        final_total = subtotal + vat_amount - discount
 
+        # 5. Record the sale entries
         for i, (p_id, qty, price) in enumerate(cart_items):
-            db.execute("UPDATE products SET quantity = quantity - ? WHERE id=?", (qty, p_id))
-            
             if i == 0:
+                # First item holds the grand total and tax info
                 db.execute("INSERT INTO sales (product_id, quantity, total_price, grand_total, vat_amount, discount) VALUES (?, ?, ?, ?, ?, ?)",
-                           (p_id, qty, price, final_total, vat, disc))
+                           (p_id, qty, price, final_total, vat_amount, discount))
             else:
+                # Subsequent items in the same cart
                 db.execute("INSERT INTO sales (product_id, quantity, total_price, grand_total) VALUES (?, ?, ?, ?)",
                            (p_id, qty, price, price))
 
+        # 6. Commit and get the Transaction ID for the receipt
         db.commit()
-        return jsonify({"status": "success", "total": round(final_total, 2)})
+        
+        # Get the ID of the sale we just inserted
+        last_id = db.execute("SELECT id FROM sales ORDER BY id DESC LIMIT 1").fetchone()
+        
+        return jsonify({
+            "status": "success", 
+            "total": round(final_total, 2),
+            "trans_id": last_id['id']  # This connects to your JavaScript r-id
+        })
+
+    except sqlite3.IntegrityError:
+        db.rollback()
+        return jsonify({"status": "error", "message": "Transaction failed: Stock limit reached."}), 400
     except Exception as e:
         db.rollback()
         return jsonify({"status": "error", "message": str(e)}), 400
@@ -264,22 +297,83 @@ def daily_items_report():
     ''', (target_date,)).fetchall()
 
     return render_template('daily_items.html', items=report_data, date=target_date)
+
 @app.route("/sales")
 @login_required
 def sales_history():
     db = get_db()
-    # This query joins sales and products so you can see the name of what was sold
-    sales_data = db.execute('''
-        SELECT s.id, p.name, s.quantity, s.total_price, s.timestamp 
-        FROM sales s 
-        JOIN products p ON s.product_id = p.id 
-        ORDER BY s.timestamp DESC
-    ''').fetchall()
     
+    # 1. Get the filter dates from the browser (if they exist)
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+
+    # Base Queries
+    sales_query = "SELECT s.id, p.name, s.quantity, s.total_price, s.grand_total, s.vat_amount, s.timestamp FROM sales s JOIN products p ON s.product_id = p.id"
+    totals_query = "SELECT IFNULL(SUM(grand_total), 0) as total_revenue, IFNULL(SUM(vat_amount), 0) as total_vat, IFNULL(SUM(discount), 0) as total_discount FROM sales"
+    
+    params = []
+    
+    # 2. Add the "WHERE" clause only if dates are provided
+    if start_date and end_date:
+        # We use DATE() to ignore the specific time and just look at the day
+        filter_sql = " WHERE DATE(s.timestamp) BETWEEN ? AND ?"
+        sales_query += filter_sql
+        
+        # Totals query doesn't have the 's' alias join, so we adjust slightly
+        totals_query += " WHERE DATE(timestamp) BETWEEN ? AND ?"
+        params = [start_date, end_date]
+
+    # Always show newest sales first
+    sales_query += " ORDER BY s.timestamp DESC"
+
+    # 3. Execute with parameters to prevent SQL Injection
+    sales_list = db.execute(sales_query, params).fetchall()
+    totals = db.execute(totals_query, params).fetchone()
+
+    return render_template("sales_report.html", sales=sales_list, totals=totals)
+
+@app.route("/api/top_products")
+@login_required
+def top_products():
+    db = get_db()
+    # Join sales and products to get the names and total revenue per item
+    query = '''
+        SELECT p.name, SUM(s.total_price) as revenue, SUM(s.quantity) as units_sold
+        FROM sales s
+        JOIN products p ON s.product_id = p.id
+        GROUP BY p.id
+        ORDER BY revenue DESC
+        LIMIT 5
+    '''
+    top_items = db.execute(query).fetchall()
+    return jsonify([dict(ix) for ix in top_items])
+
+
     # Calculate the lifetime revenue for the banner
     total_revenue = db.execute("SELECT SUM(total_price) FROM sales").fetchone()[0] or 0
     
     return render_template("sales_report.html", sales=sales_data, total_revenue=total_revenue)
+
+@app.route("/register", methods=["GET", "POST"]) # Changed to match your HTML action
+@login_required
+@admin_required
+def register():
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        role = request.form.get("role")
+        
+        db = get_db()
+        try:
+            db.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
+                       (username, generate_password_hash(password), role))
+            db.commit()
+            flash(f"Staff member {username} registered successfully!")
+            return redirect(url_for('register')) # Stay on page to see success msg
+        except sqlite3.IntegrityError:
+            flash("Username already exists!")
+            
+    return render_template("register.html")
 
 if __name__ == "__main__":
     init_db()
