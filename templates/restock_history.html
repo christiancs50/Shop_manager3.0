@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Restock History</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; height: 100vh; background: #f0f2f5; }
+        .sidebar { width: 250px; background: #2c3e50; color: white; padding: 20px; }
+        .main { flex: 1; padding: 40px; overflow-y: auto; }
+        .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; }
+        th { background: #34495e; color: white; position: sticky; top: 0; }
+        
+        .bg-blue { background: #3498db; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px; font-size: 14px; }
+        .bg-blue:hover { background: #2980b9; }
+
+        .search-input { 
+            width: 100%; 
+            max-width: 300px; 
+            padding: 10px; 
+            border: 1px solid #ddd; 
+            border-radius: 4px; 
+            font-size: 14px;
+            outline: none;
+        }
+        .search-input:focus { border-color: #3498db; }
+        
+        .header-flex { display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px; }
+        .action-bar { display: flex; gap: 15px; align-items: center; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h3>Admin Menu</h3>
+        <hr>
+        <a href="/inventory" style="color:white; text-decoration: none;"><p>⬅️ Back to Inventory</p></a>
+        <a href="/dashboard" style="color:white; text-decoration: none;"><p>🏠 POS Dashboard</p></a>
+    </div>
+
+    <div class="main">
+        <div class="header-flex">
+            <h1 style="margin: 0;">📦 Restock History</h1>
+            <div class="action-bar">
+                <input type="text" id="historySearch" class="search-input" placeholder="🔍 Search product or date...">
+                <a href="/download_restock_pdf" class="bg-blue">📥 Download PDF Report</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <table id="historyTable">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Product Name</th>
+                        <th>Old Stock</th>
+                        <th>Added</th>
+                        <th>New Stock Total</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr class="log-row">
+                        <td class="log-date">{{ log.change_date }}</td>
+                        <td class="log-name"><strong>{{ log.name }}</strong></td>
+                        <td>{{ log.old_quantity }}</td>
+                        <td style="color: #27ae60; font-weight: bold;">+{{ log.added_quantity }}</td>
+                        <td><strong>{{ log.new_quantity }}</strong></td>
+                        <td>
+                            <form action="{{ url_for('delete_restock_log', log_id=log.id) }}" method="POST" onsubmit="return confirm('Delete this log? This will subtract {{ log.added_quantity }} from your current stock.');">
+                                <button type="submit" style="background: none; border: none; cursor: pointer; color: #e74c3c; font-size: 18px;">🗑️</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Real-time Search Logic
+        document.getElementById('historySearch').addEventListener('keyup', function() {
+            let filter = this.value.toLowerCase();
+            let rows = document.querySelectorAll('.log-row');
+            
+            rows.forEach(row => {
+                let productName = row.querySelector('.log-name').textContent.toLowerCase();
+                let logDate = row.querySelector('.log-date').textContent.toLowerCase();
+                
+                // Show row if search matches name OR date
+                if (productName.includes(filter) || logDate.includes(filter)) {
+                    row.style.display = "";
+                } else {
+                    row.style.display = "none";
+                }
+            });
+        });
+    </script>
+</body>
+</html>

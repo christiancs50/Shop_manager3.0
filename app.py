@@ -1,8 +1,17 @@
+import io
 import os
 import sqlite3
 from datetime import datetime, date
 from functools import wraps
 from dotenv import load_dotenv  # Ensure you ran 'pip install python-dotenv'
+
+#The PDF specific imports
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
+
 from flask import Flask, render_template, request, redirect, url_for, g, session, jsonify, flash, Response
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -39,11 +48,14 @@ def init_db():
     with app.app_context():
         db = get_db()
         
+        # Product Table
         db.execute('''CREATE TABLE IF NOT EXISTS products (
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
-            name TEXT NOT NULL, 
+            name TEXT NOT NULL,
+            category TEXT DEFAULT 'General', 
             sell_price REAL NOT NULL, 
             quantity INTEGER NOT NULL CHECK(quantity >= 0),
+            is_active INTEGER DEFAULT 1,
             min_stock_level INTEGER DEFAULT 5,
             date_added DATETIME DEFAULT CURRENT_TIMESTAMP)''')
             
@@ -56,7 +68,10 @@ def init_db():
             vat_amount REAL DEFAULT 0.0,
             discount REAL DEFAULT 0.0,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE RESTRICT)''')
+            user_id INTEGER,
+            FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE RESTRICT,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+            )''')
             
         db.execute('''CREATE TABLE IF NOT EXISTS cash_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -76,20 +91,22 @@ def init_db():
             shop_name TEXT,
             logo_path TEXT)''')
         
-        db.execute('''CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, 
-            name TEXT NOT NULL, 
-            category TEXT DEFAULT 'General',     -- New: For filtering
-            sell_price REAL NOT NULL, 
-            quantity INTEGER NOT NULL CHECK(quantity >= 0), 
-            is_active INTEGER DEFAULT 1,         -- New: 1 = Active, 0 = Deleted
-            min_stock_level INTEGER DEFAULT 5,
-            date_added DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+        db.execute('''CREATE TABLE IF NOT EXISTS inventory_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER,
+            old_quantity INTEGER,
+            added_quantity INTEGER,
+            new_quantity INTEGER,
+            change_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (product_id) REFERENCES products (id)
+            )''')
         
+        # Default Admin Setup
         if not db.execute("SELECT * FROM users WHERE username = 'admin'").fetchone():
             db.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
                        ("admin", generate_password_hash("admin123"), "Admin"))
 
+        # Default Shop setup
         if not db.execute("SELECT * FROM shop_settings WHERE id = 1").fetchone():
             db.execute("INSERT INTO shop_settings (id, shop_name, logo_path) VALUES (1, 'My Shop', 'default_logo.png')")
 
@@ -127,6 +144,7 @@ def login():
         user = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
         if user and check_password_hash(user['password_hash'], password):
             session.clear()
+            session['user_id'] = user['id']
             session['user'] = user['username']
             session['role'] = user['role']
             return redirect(url_for("dashboard"))
@@ -144,7 +162,7 @@ def logout():
 def dashboard():
     db = get_db()
     shop_info = db.execute("SELECT * FROM shop_settings WHERE id = 1").fetchone()
-    products = db.execute("SELECT * FROM products WHERE quantity > 0").fetchall()
+    products = db.execute("SELECT * FROM products WHERE quantity > 0 AND is_active = 1").fetchall()
     return render_template("dashboard.html", user=session['user'], role=session['role'], 
                            shop_info=dict(shop_info) if shop_info else {"shop_name": "My Shop"}, 
                            products=[dict(p) for p in products])
@@ -156,67 +174,35 @@ def settle_payment():
     data = request.json
     db = get_db()
     try:
-        # Start the transaction to ensure all-or-nothing logic
         db.execute("BEGIN")
-        
         subtotal = 0
         cart_items = []
 
         for item in data['cart']:
-            # 1. Fetch price and current stock
-            prod = db.execute("SELECT name, sell_price, quantity FROM products WHERE id=?", (item['id'],)).fetchone()
+            prod = db.execute("SELECT name, sell_price, quantity FROM products WHERE id=? AND is_active=1", (item['id'],)).fetchone()
+            if not prod or prod['quantity'] < item['qty']:
+                raise Exception(f"Stock issue with {prod['name'] if prod else 'Item'}")
             
-            if not prod:
-                raise Exception(f"Item ID {item['id']} not found.")
-            
-            # 2. Check if enough stock exists before updating
-            if prod['quantity'] < item['qty']:
-                raise Exception(f"Low stock for {prod['name']} (Available: {prod['quantity']})")
-            
-            # 3. Deduct stock (This will also trigger the CHECK constraint if quantity < 0)
-            db.execute("UPDATE products SET quantity = quantity - ? WHERE id=?", 
-                       (item['qty'], item['id']))
-            
+            db.execute("UPDATE products SET quantity = quantity - ? WHERE id=?", (item['qty'], item['id']))
             line_price = prod['sell_price'] * item['qty']
             subtotal += line_price
             cart_items.append((item['id'], item['qty'], line_price))
 
-        # 4. Calculate Totals
-        vat_percent = data.get('vat_percent', 0)
-        vat_amount = subtotal * (vat_percent / 100)
-        discount = data.get('discount', 0)
-        final_total = subtotal + vat_amount - discount
+        vat_amount = subtotal * (data.get('vat_percent', 0) / 100)
+        final_total = subtotal + vat_amount - data.get('discount', 0)
 
-        # 5. Record the sale entries
         for i, (p_id, qty, price) in enumerate(cart_items):
-            if i == 0:
-                # First item holds the grand total and tax info
-                db.execute("INSERT INTO sales (product_id, quantity, total_price, grand_total, vat_amount, discount) VALUES (?, ?, ?, ?, ?, ?)",
-                           (p_id, qty, price, final_total, vat_amount, discount))
-            else:
-                # Subsequent items in the same cart
-                db.execute("INSERT INTO sales (product_id, quantity, total_price, grand_total) VALUES (?, ?, ?, ?)",
-                           (p_id, qty, price, price))
+            g_total = final_total if i == 0 else 0.0 # Store grand total only on the first item of the transaction
+            db.execute("INSERT INTO sales (product_id, quantity, total_price, grand_total, vat_amount, discount, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                       (p_id, qty, price, g_total, vat_amount if i==0 else 0, data.get('discount', 0) if i==0 else 0, session.get('user_id')))
 
-        # 6. Commit and get the Transaction ID for the receipt
         db.commit()
-        
-        # Get the ID of the sale we just inserted
         last_id = db.execute("SELECT id FROM sales ORDER BY id DESC LIMIT 1").fetchone()
-        
-        return jsonify({
-            "status": "success", 
-            "total": round(final_total, 2),
-            "trans_id": last_id['id']  # This connects to your JavaScript r-id
-        })
-
-    except sqlite3.IntegrityError:
-        db.rollback()
-        return jsonify({"status": "error", "message": "Transaction failed: Stock limit reached."}), 400
+        return jsonify({"status": "success", "total": round(final_total, 2), "trans_id": last_id['id']})
     except Exception as e:
         db.rollback()
         return jsonify({"status": "error", "message": str(e)}), 400
-
+        
 @app.route("/inventory")
 @login_required
 def inventory():
@@ -229,12 +215,125 @@ def inventory():
 @login_required
 @admin_required
 def add_product():
+    name = request.form.get("name").strip()
+    price = float(request.form.get("price"))
+    added_qty = int(request.form.get("quantity"))
     db = get_db()
-    db.execute("INSERT INTO products (name, sell_price, quantity) VALUES (?, ?, ?)", 
-               (request.form.get("name"), request.form.get("price"), request.form.get("quantity")))
+    
+    # Check if the product exists
+    existing = db.execute("SELECT id, quantity FROM products WHERE name = ?", (name,)).fetchone()
+
+    if existing:
+        old_qty = existing['quantity']
+        new_qty = old_qty + added_qty
+        
+        # 1. Update the product table
+        db.execute("UPDATE products SET quantity = ?, sell_price = ? WHERE id = ?", 
+                   (new_qty, price, existing['id']))
+        
+        # 2. Record the history in the log
+        db.execute("INSERT INTO inventory_log (product_id, old_quantity, added_quantity, new_quantity) VALUES (?, ?, ?, ?)",
+                   (existing['id'], old_qty, added_qty, new_qty))
+        
+        flash(f"Restocked {name}: Was {old_qty}, now {new_qty}.")
+    else:
+        # For brand new products, we just insert into products
+        db.execute("INSERT INTO products (name, sell_price, quantity) VALUES (?, ?, ?)", 
+                   (name, price, added_qty))
+        flash(f"New product {name} added to inventory.")
+
     db.commit()
-    flash("Product added!")
     return redirect(url_for("inventory"))
+
+@app.route("/delete_restock_log/<int:log_id>", methods=["POST"])
+@login_required
+@admin_required
+def delete_restock_log(log_id):
+    db = get_db()
+    
+    # 1. Find the log entry
+    log = db.execute("SELECT * FROM inventory_log WHERE id = ?", (log_id,)).fetchone()
+    
+    if log:
+        product_id = log['product_id']
+        added_qty = log['added_quantity']
+        
+        # 2. Subtract the added quantity from the current product stock
+        db.execute("UPDATE products SET quantity = quantity - ? WHERE id = ?", (added_qty, product_id))
+        
+        # 3. Delete the log
+        db.execute("DELETE FROM inventory_log WHERE id = ?", (log_id,))
+        db.commit()
+        flash("Restock log deleted and stock adjusted back.")
+    
+    return redirect(url_for('restock_history'))
+
+@app.route("/restock_history")
+@login_required
+@admin_required
+def restock_history():
+    db = get_db()
+    logs = db.execute('''
+        SELECT l.id, p.name, l.old_quantity, l.added_quantity, l.new_quantity, l.change_date 
+        FROM inventory_log l 
+        JOIN products p ON l.product_id = p.id 
+        ORDER BY l.change_date DESC
+    ''').fetchall()
+    return render_template("restock_history.html", logs=logs)
+
+@app.route("/download_restock_pdf")
+@login_required
+@admin_required
+def download_restock_pdf():
+    db = get_db()
+    logs = db.execute('''
+        SELECT p.name, l.old_quantity, l.added_quantity, l.new_quantity, l.change_date 
+        FROM inventory_log l 
+        JOIN products p ON l.product_id = p.id 
+        ORDER BY l.change_date DESC
+    ''').fetchall()
+
+    # Create a file-like buffer to receive PDF data
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    elements = []
+    
+    # Title
+    styles = getSampleStyleSheet()
+    elements.append(Paragraph("Inventory Restock Report", styles['Title']))
+    elements.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles['Normal']))
+    
+    # Table Data
+    data = [["Date", "Product", "Old Stock", "Added", "New Total"]]
+    for log in logs:
+        data.append([
+            log['change_date'][:16], # Shorten date string
+            log['name'],
+            str(log['old_quantity']),
+            f"+{log['added_quantity']}",
+            str(log['new_quantity'])
+        ])
+
+    # Styling the Table
+    table = Table(data)
+    style = TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.dodgerblue),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ])
+    table.setStyle(style)
+    elements.append(table)
+
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    
+    return Response(buffer, mimetype='application/pdf', 
+                    headers={"Content-Disposition": "attachment;filename=restock_report.pdf"})
 
 # --- 5. FINANCE & REPORTS ---
 @app.route('/reports')
@@ -348,11 +447,6 @@ def top_products():
     top_items = db.execute(query).fetchall()
     return jsonify([dict(ix) for ix in top_items])
 
-
-    # Calculate the lifetime revenue for the banner
-    total_revenue = db.execute("SELECT SUM(total_price) FROM sales").fetchone()[0] or 0
-    
-    return render_template("sales_report.html", sales=sales_data, total_revenue=total_revenue)
 
 @app.route("/register", methods=["GET", "POST"]) # Changed to match your HTML action
 @login_required
