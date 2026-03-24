@@ -18,6 +18,34 @@
         .search-container { margin-bottom: 15px; display: flex; align-items: center; }
         .search-input { width: 100%; max-width: 400px; padding: 12px; border: 2px solid #3498db; outline: none; font-size: 16px; }
         .timestamp { font-size: 11px; color: #7f8c8d; }
+
+        /* The Modal (background) */
+        .modal {
+           display: none; 
+            position: fixed; 
+            z-index: 1000; 
+            left: 0; top: 0;
+            width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.5); 
+        }
+
+        /* Modal Content */
+        .modal-content {
+           background-color: white;
+            margin: 10% auto;
+            padding: 20px;
+            border-radius: 8px;
+            width: 400px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+
+        .modal-header { border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
+        .modal-footer { border-top: 1px solid #eee; padding-top: 15px; margin-top: 15px; text-align: right; }
+
+        .modal input { width: 90%; display: block; margin-bottom: 15px; padding: 10px; }
+        th:last-child, td:last-child {
+        min-width: 140px;
+        text-align: center; /* Optional: makes the buttons look centered */}
     </style>
 </head>
 <body>
@@ -39,8 +67,34 @@
         <a href="/change_password" style="color:white; text-decoration: none;"><p>🔒 Change Password</p></a>
         <a href="/logout" style="color:#ff7675; text-decoration: none;">Logout</a>
     </div>
+    <div id="editModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header"><h2>Edit Product</h2></div>
+        <input type="hidden" id="edit-id">
+        <label>Product Name</label>
+        <input type="text" id="edit-name">
+        <label>Selling Price</label>
+        <input type="number" step="0.01" id="edit-price">
+        <label>Current Quantity</label>
+        <input type="number" id="edit-qty">
+        <div class="modal-footer">
+            <button class="btn" onclick="closeModal()" style="background:#95a5a6;">Cancel</button>
+            <button class="btn bg-green" onclick="saveEdit()">Save Changes</button>
+        </div>
+    </div>
+</div>
 
     <div class="main">
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                {% for message in messages %}
+                    <div style="padding: 10px; margin-bottom: 20px; background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; border-radius: 4px;">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
         <h1> Inventory</h1>
         
         {% if session['role'] == 'Admin' %}
@@ -50,7 +104,10 @@
                 <input type="text" name="name" placeholder="Product Name" required>
                 <input type="number" step="0.01" name="price" placeholder="Selling Price" required>
                 <input type="number" name="quantity" placeholder="Qty" required>
-                <button type="submit" class="btn bg-green">Add to Stock</button>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button type="submit" class="btn bg-green">Add to Stock</button>
+                    <a href="/restock_history" class="btn" style="background: #34495e;">View Restock History</a>
+                </div>
             </form>
             
         </div>
@@ -82,7 +139,13 @@
                         <td class="timestamp">{{ product.date_added }}</td>
                         {% if session['role'] == 'Admin' %}
                         <td>
-                            <button class="btn bg-orange" onclick="editProduct('{{ product.id }}', '{{ product.name }}', '{{ product.sell_price }}', '{{ product.quantity }}')">Edit</button>
+                             <div style="display: flex; gap: 5px;">
+                                <button class="btn bg-orange" onclick="editProduct('{{ product.id }}', '{{ product.name }}', '{{ product.sell_price }}', '{{ product.quantity }}')">Edit</button>
+        
+                                <form action="/delete_product/{{ product.id }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this product? This cannot be undone.');">
+                                   <button type="submit" class="btn" style="background: #e74c3c;">Delete</button>
+                                </form>
+                            </div>
                         </td>
                         {% endif %}
                     </tr>
@@ -103,27 +166,60 @@
         });
 
         function editProduct(id, name, price, qty) {
-            const newName = prompt("Edit Product Name:", name);
-            if (!newName) return;
-            const newPrice = prompt("Edit Price:", price);
-            if (!newPrice) return;
-            const newQty = prompt("Edit Quantity:", qty);
-            if (!newQty) return;
+    // Fill the modal fields with current data
+    document.getElementById('edit-id').value = id;
+    document.getElementById('edit-name').value = name;
+    document.getElementById('edit-price').value = price;
+    document.getElementById('edit-qty').value = qty;
+    
+    // Show the modal
+    document.getElementById('editModal').style.display = "block";
+    }
 
-            fetch('/edit_product', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    id: id,
-                    name: newName,
-                    price: parseFloat(newPrice),
-                    quantity: parseInt(newQty)
-                })
-            }).then(res => res.json()).then(data => {
-                if(data.status === 'success') location.reload();
-                else alert("Error: " + data.message);
-            });
-        }
+    // Auto-hide flash messages after 3 seconds
+    setTimeout(function() {
+        // Select all divs inside the 'main' class that are flash messages
+        let flashMessages = document.querySelectorAll('.main > div[style*="padding: 10px"]');
+        flashMessages.forEach(msg => {
+            // Smoothly fade out before hiding
+            msg.style.transition = "opacity 0.5s ease";
+            msg.style.opacity = "0";
+            setTimeout(() => msg.remove(), 500); // Remove from the page entirely
+        });
+        }, 3000);
+
+    function closeModal() {
+        document.getElementById('editModal').style.display = "none";
+    }
+
+    function saveEdit() {
+        const data = {
+            id: document.getElementById('edit-id').value,
+            name: document.getElementById('edit-name').value,
+            price: parseFloat(document.getElementById('edit-price').value),
+            quantity: parseInt(document.getElementById('edit-qty').value)
+        };
+
+        fetch('/edit_product', {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify(data)
+       })
+       .then(res => res.json())
+       .then(data => {
+           if(data.status === 'success') {
+                location.reload();
+            } else {
+                alert("Error: " + data.message);
+            }
+         });
+    }
+
+    // Close modal if user clicks outside of it
+    window.onclick = function(event) {
+        let modal = document.getElementById('editModal');
+        if (event.target == modal) closeModal();
+    }
     </script>
 </body>
 </html>

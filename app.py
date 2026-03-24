@@ -57,7 +57,7 @@ def init_db():
             quantity INTEGER NOT NULL CHECK(quantity >= 0),
             is_active INTEGER DEFAULT 1,
             min_stock_level INTEGER DEFAULT 5,
-            date_added DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+            date_added DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')))''')
             
         db.execute('''CREATE TABLE IF NOT EXISTS sales (
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
@@ -67,7 +67,7 @@ def init_db():
             grand_total REAL DEFAULT 0.0,
             vat_amount REAL DEFAULT 0.0,
             discount REAL DEFAULT 0.0,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            timestamp DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
             user_id INTEGER,
             FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE RESTRICT,
             FOREIGN KEY (user_id) REFERENCES users (id)
@@ -78,7 +78,7 @@ def init_db():
             amount REAL,
             type TEXT, 
             description TEXT, 
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+            timestamp DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')))''')
             
         db.execute('''CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,7 +89,12 @@ def init_db():
         db.execute('''CREATE TABLE IF NOT EXISTS shop_settings (
             id INTEGER PRIMARY KEY,
             shop_name TEXT,
-            logo_path TEXT)''')
+            logo_path TEXT,
+            tax_rate REAL DEFAULT 0.0,
+            currency TEXT DEFAULT '$',
+            delete_grace_period INTEGER DEFAULT 7,
+            address TEXT,
+            contact_number TEXT)''')
         
         db.execute('''CREATE TABLE IF NOT EXISTS inventory_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,7 +102,7 @@ def init_db():
             old_quantity INTEGER,
             added_quantity INTEGER,
             new_quantity INTEGER,
-            change_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            change_date DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
             FOREIGN KEY (product_id) REFERENCES products (id)
             )''')
         
@@ -156,6 +161,35 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
+@app.route("/settings", methods=["GET", "POST"])
+@login_required
+@admin_required
+def settings():
+    db = get_db()
+    
+    if request.method == "POST":
+        shop_name = request.form.get("shop_name")
+        tax_rate = request.form.get("tax_rate")
+        currency = request.form.get("currency")
+        grace_period = request.form.get("grace_period")
+        address = request.form.get("address")
+        contact = request.form.get("contact")
+
+        db.execute('''
+            UPDATE shop_settings 
+            SET shop_name = ?, tax_rate = ?, currency = ?, 
+                delete_grace_period = ?, address = ?, contact_number = ?
+            WHERE id = 1
+        ''', (shop_name, tax_rate, currency, grace_period, address, contact))
+        db.commit()
+        flash("Settings updated successfully!")
+        return redirect(url_for('settings'))
+
+    # Fetch current settings to display in the form
+    shop_info = db.execute("SELECT * FROM shop_settings WHERE id = 1").fetchone()
+    return render_template("settings.html", shop=shop_info)
+
+
 # --- 4. POS & INVENTORY ---
 @app.route("/dashboard")
 @login_required
@@ -207,9 +241,90 @@ def settle_payment():
 @login_required
 def inventory():
     db = get_db()
-    products = db.execute("SELECT * FROM products").fetchall()
+    products = db.execute("SELECT *, (quantity <= min_stock_level) as is_low FROM products").fetchall()
     total_val = sum(p['sell_price'] * p['quantity'] for p in products)
     return render_template("inventory.html", products=products, total_value=total_val)
+
+
+@app.route("/edit_product", methods=["POST"])
+@login_required
+@admin_required
+def edit_product():
+    data = request.json
+    product_id = data.get('id')
+    new_name = data.get('name')
+    new_price = data.get('price')
+    new_qty = data.get('quantity')
+
+    if not all([product_id, new_name, new_price is not None, new_qty is not None]):
+        return jsonify({"status": "error", "message": "Missing data"}), 400
+
+    db = get_db()
+    try:
+        db.execute('''
+            UPDATE products 
+            SET name = ?, sell_price = ?, quantity = ? 
+            WHERE id = ?
+        ''', (new_name, new_price, new_qty, product_id))
+        db.commit()
+        return jsonify({"status": "success"})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/delete_product/<int:product_id>", methods=["POST"])
+@login_required
+@admin_required
+def delete_product(product_id):
+    db = get_db()
+    DAYS_LIMIT = 7 
+
+    try:
+        # 1. Fetch the product
+        product = db.execute("SELECT name, date_added FROM products WHERE id = ?", (product_id,)).fetchone()
+        
+        if not product:
+            flash("Product not found!")
+            return redirect(url_for('inventory'))
+
+        # 2. Safe Date Parsing
+        added_date_str = product['date_added']
+        added_date = None
+        
+        # Try different common SQLite formats to prevent a crash
+        for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
+            try:
+                added_date = datetime.strptime(added_date_str, fmt)
+                break
+            except ValueError:
+                continue
+
+        if not added_date:
+            flash("Error: Could not determine product age. Deletion blocked for safety.")
+            return redirect(url_for('inventory'))
+
+        # 3. Calculate Age
+        age_in_days = (datetime.utcnow() - added_date).days
+
+        # 4. Security Check
+        if age_in_days >= DAYS_LIMIT:
+            flash(f"Security Policy: '{product['name']}' is {age_in_days} days old. "
+                  f"Items older than {DAYS_LIMIT} days cannot be deleted to preserve sales history.")
+            return redirect(url_for('inventory'))
+
+        # 5. Final Deletion Attempt
+        db.execute("DELETE FROM products WHERE id = ?", (product_id,))
+        db.commit()
+        flash(f"Successfully deleted '{product['name']}'.")
+
+    except sqlite3.IntegrityError:
+        flash("Database Error: This product is linked to existing sales and cannot be deleted.")
+    except Exception as e:
+        print(f"Delete Error: {e}") 
+        flash(f"An unexpected error occurred: {str(e)}")
+        
+    return redirect(url_for('inventory'))
+
 
 @app.route("/add_product", methods=["POST"])
 @login_required
@@ -301,7 +416,7 @@ def download_restock_pdf():
     # Title
     styles = getSampleStyleSheet()
     elements.append(Paragraph("Inventory Restock Report", styles['Title']))
-    elements.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M')}", styles['Normal']))
+    elements.append(Paragraph(f"Generated on: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}", styles['Normal']))
     
     # Table Data
     data = [["Date", "Product", "Old Stock", "Added", "New Total"]]
@@ -357,7 +472,7 @@ def reports():
     yearly = [{'year': r['year'], 'month_name': datetime.strptime(r['month_num'], "%m").strftime("%B"), 'total': r['total']} for r in yearly_raw]
 
     return render_template('reports.html', total_in=total_in, total_out=total_out, balance=total_in-total_out,
-                           daily=daily, monthly=monthly, yearly=yearly, current_date=datetime.now().strftime("%d %b %Y"), filter=report_filter)
+                           daily=daily, monthly=monthly, yearly=yearly, current_date=datetime.utcnow().strftime("%d %b %Y"), filter=report_filter)
 
 @app.route("/cash", methods=["GET", "POST"])
 @login_required
@@ -377,7 +492,7 @@ def cash():
 @app.route('/reports/daily_items')
 @admin_required
 def daily_items_report():
-    target_date = request.args.get('date', datetime.now().strftime('%Y-%m-%d'))
+    target_date = request.args.get('date', datetime.utcnow().strftime('%Y-%m-%d'))
     db = get_db()
 
     # Fixed query to use 'quantity' instead of 'current_stock'
