@@ -1,60 +1,119 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Register Staff</title>
+    <title>Register Staff - {{ shop.shop_name }}</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; height: 100vh; background: #f0f2f5; }
-        .sidebar { width: 250px; background: #2c3e50; color: white; padding: 20px; }
-        .main { flex: 1; padding: 40px; display: flex; justify-content: center; align-items: flex-start; }
-        .card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); width: 400px; }
-        input, select, button { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 16px; }
-        button { background: #27ae60; color: white; border: none; font-weight: bold; cursor: pointer; transition: background 0.3s; }
+        .sidebar { width: 250px; background: #2c3e50; color: white; padding: 20px; flex-shrink: 0; }
+        .main { flex: 1; padding: 40px; overflow-y: auto; }
+        
+        /* Updated container to stack vertically */
+        .container { display: flex; flex-direction: column; gap: 30px; max-width: 800px; margin: auto; }
+        
+        .card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        
+        /* Form stays centered and reasonable size */
+        .form-card { width: 100%; max-width: 500px; margin: 0 auto; }
+        
+        /* List expands to fill the container */
+        .list-card { width: 100%; }
+        
+        input, select, button { width: 100%; padding: 12px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; font-size: 15px; }
+        button { background: #27ae60; color: white; border: none; font-weight: bold; cursor: pointer; transition: 0.3s; }
         button:hover { background: #219150; }
-        .msg { padding: 10px; margin-bottom: 10px; border-radius: 4px; text-align: center; font-size: 14px; }
-        .error { background: #fadbd8; color: #e74c3c; }
-        .success { background: #d4efdf; color: #27ae60; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
+        th { background: #f8f9fa; color: #7f8c8d; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; }
+        
+        .badge { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; text-transform: uppercase; }
+        .badge-admin { background: #ebf5fb; color: #2980b9; }
+        .badge-cashier { background: #fef9e7; color: #f1c40f; }
+        
+        .msg { padding: 12px; margin-bottom: 20px; border-radius: 4px; text-align: center; font-size: 14px; }
+        .error { background: #fadbd8; color: #e74c3c; border: 1px solid #f5b7b1; }
+        .success { background: #d4efdf; color: #27ae60; border: 1px solid #a9dfbf; }
+        
+        .delete-btn { color: #e74c3c; text-decoration: none; font-weight: bold; font-size: 12px; border: none; background: none; cursor: pointer; padding: 5px; }
+        .delete-btn:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
     <div class="sidebar">
-        <h3>POS SYSTEM</h3>
-        <hr>
+        <h3 style="color: #00AEEF;">{{ shop.shop_name }}</h3>
+        <hr style="border: 0.5px solid #34495e; margin-bottom: 20px;">
         <a href="/dashboard" style="color:white; text-decoration: none;"><p>🏠 POS Dashboard</p></a>
         <a href="/inventory" style="color:white; text-decoration: none;"><p>📦 Inventory</p></a>
-        <hr>
-        <a href="/logout" style="color:#ff7675; text-decoration: none;">Logout</a>
+        <a href="/settings" style="color:white; text-decoration: none;"><p>⚙️ Settings</p></a>
+        <hr style="border: 0.5px solid #34495e; margin-top: 20px;">
+        <a href="/logout" style="color:#ff7675; text-decoration: none; font-weight: bold;">Logout</a>
     </div>
 
     <div class="main">
-        <div class="card">
-            <h2 style="text-align: center; color: #2c3e50;">Register New Staff</h2>
-            <p style="text-align: center; color: #7f8c8d; font-size: 14px;">Create accounts for your shop attendants</p>
+        <div class="container">
             
-            {% with messages = get_flashed_messages() %}
-                {% if messages %}
-                    <div class="msg {{ 'success' if 'successfully' in messages[0] else 'error' }}">
-                        {{ messages[0] }}
-                    </div>
-                {% endif %}
-            {% endwith %}
+            <div class="card form-card">
+                <h2 style="margin-top: 0; color: #2c3e50; text-align: center;">Register New Staff</h2>
+                
+                {% with messages = get_flashed_messages() %}
+                    {% if messages %}
+                        <div class="msg {{ 'success' if 'successfully' in messages[0] else 'error' }}">
+                            {{ messages[0] }}
+                        </div>
+                    {% endif %}
+                {% endwith %}
 
-            <form action="/register" method="POST">
-                <label>Username / Full Name</label>
-                <input type="text" name="username" placeholder="e.g. Kwesi_Mensah" required>
-                
-                <label>System Password</label>
-                <input type="password" name="password" placeholder="Create a temporary password" required>
-                
-                <label>Access Level</label>
-                <select name="role">
-                    <option value="Cashier">Cashier (View Stock & Sell Only)</option>
-                    <option value="Admin">Admin (Full System Access)</option>
-                </select>
-                
-                <button type="submit">CREATE STAFF ACCOUNT</button>
-            </form>
-            
-            <a href="/inventory" style="display: block; text-align: center; margin-top: 15px; color: #7f8c8d; text-decoration: none; font-size: 13px;">← Back to Inventory</a>
+                <form action="/register" method="POST">
+                    <label style="font-size: 13px; font-weight: bold; color: #34495e;">Username</label>
+                    <input type="text" name="username" placeholder="e.g. Kwesi_Mensah" required>
+                    
+                    <label style="font-size: 13px; font-weight: bold; color: #34495e;">Temporary Password</label>
+                    <input type="password" name="password" placeholder="Create a password" required>
+                    
+                    <label style="font-size: 13px; font-weight: bold; color: #34495e;">Access Level</label>
+                    <select name="role">
+                        <option value="Cashier">Cashier (Sales & Inventory View)</option>
+                        <option value="Admin">Admin (Full System Settings)</option>
+                    </select>
+                    
+                    <button type="submit">CREATE STAFF ACCOUNT</button>
+                </form>
+            </div>
+
+            <div class="card list-card">
+                <h3 style="margin-top: 0; color: #2c3e50;">Current Team Members</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Role</th>
+                            <th style="text-align: right;">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for person in staff %}
+                        <tr>
+                            <td><strong>{{ person.username }}</strong></td>
+                            <td>
+                                <span class="badge {{ 'badge-admin' if person.role == 'Admin' else 'badge-cashier' }}">
+                                    {{ person.role }}
+                                </span>
+                            </td>
+                            <td style="text-align: right;">
+                                {% if person.username != session['user'] %}
+                                <form action="/delete_user/{{ person.id }}" method="POST" style="display:inline;" onsubmit="return confirm('Permanently remove this user?')">
+                                    <button type="submit" class="delete-btn">Remove Account</button>
+                                </form>
+                                {% else %}
+                                <span style="font-size: 11px; color: #bdc3c7; font-style: italic;">(Logged In)</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
         </div>
     </div>
 </body>

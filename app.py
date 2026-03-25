@@ -38,6 +38,11 @@ def get_db():
         g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
 
+def get_shop_settings():
+    db = get_db()
+    # Returns the settings row as a dictionary-like object
+    return db.execute("SELECT * FROM shop_settings WHERE id = 1").fetchone()
+
 @app.teardown_appcontext
 def close_connection(exception):
     db = g.pop('db', None)
@@ -161,6 +166,37 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
+@app.context_processor
+def inject_shop():
+    db = get_db()
+    shop_data = db.execute("SELECT * FROM shop_settings WHERE id = 1").fetchone()
+    # This allows you to use {{ shop.currency }} in any HTML file
+    return dict(shop=shop_data)
+
+@app.route("/delete_user/<int:id>", methods=["POST", "GET"])
+@login_required
+@admin_required # Crucial: Only an Admin should be able to delete people!
+def delete_user(id):
+    db = get_db()
+    
+    # 1. Safety Check: Don't let the user delete themselves
+    # This prevents you from accidentally locking yourself out of the app.
+    current_user_id = session.get('user_id') 
+    if id == current_user_id:
+        flash("Error: You cannot delete your own account while logged in!")
+        return redirect(url_for('register'))
+
+    # 2. Run the Delete Command
+    try:
+        db.execute("DELETE FROM users WHERE id = ?", (id,))
+        db.commit()
+        flash("Staff account removed successfully.")
+    except Exception as e:
+        flash(f"Error removing user: {str(e)}")
+    
+    # 3. Go back to the registration/staff list page
+    return redirect(url_for('register'))
+
 @app.route("/settings", methods=["GET", "POST"])
 @login_required
 @admin_required
@@ -168,6 +204,7 @@ def settings():
     db = get_db()
     
     if request.method == "POST":
+        # 1. Collect Form Data
         shop_name = request.form.get("shop_name")
         tax_rate = request.form.get("tax_rate")
         currency = request.form.get("currency")
@@ -175,31 +212,86 @@ def settings():
         address = request.form.get("address")
         contact = request.form.get("contact")
 
-        db.execute('''
-            UPDATE shop_settings 
-            SET shop_name = ?, tax_rate = ?, currency = ?, 
-                delete_grace_period = ?, address = ?, contact_number = ?
-            WHERE id = 1
-        ''', (shop_name, tax_rate, currency, grace_period, address, contact))
+        # 2. Handle Logo Upload
+        file = request.files.get('logo')
+        if file and file.filename != '':
+            filename = secure_filename(file.filename)
+            upload_path = os.path.join('static', 'uploads')
+            if not os.path.exists(upload_path):
+                os.makedirs(upload_path)
+            file.save(os.path.join(upload_path, filename))
+            
+            db.execute('''
+                UPDATE shop_settings 
+                SET shop_name=?, tax_rate=?, currency=?, 
+                    delete_grace_period=?, address=?, contact_number=?, logo_path=?
+                WHERE id = 1
+            ''', (shop_name, tax_rate, currency, grace_period, address, contact, filename))
+        else:
+            db.execute('''
+                UPDATE shop_settings 
+                SET shop_name=?, tax_rate=?, currency=?, 
+                    delete_grace_period=?, address=?, contact_number=?
+                WHERE id = 1
+            ''', (shop_name, tax_rate, currency, grace_period, address, contact))
+            
         db.commit()
         flash("Settings updated successfully!")
         return redirect(url_for('settings'))
 
-    # Fetch current settings to display in the form
-    shop_info = db.execute("SELECT * FROM shop_settings WHERE id = 1").fetchone()
-    return render_template("settings.html", shop=shop_info)
+    # GET request: shop data is now handled by the context_processor above
+    return render_template("settings.html")
 
+@app.route("/update_settings", methods=["POST"])
+def update_settings():
+    db = get_db()
+    
+    # Get values from your HTML form
+    shop_name = request.form.get("shop_name")
+    currency = request.form.get("currency")
+    tax_rate = request.form.get("tax_rate")
+    address = request.form.get("address")
+    contact = request.form.get("contact")
+    grace = request.form.get("grace_period")
+
+    # Update the database (assuming your table is named 'shop')
+    db.execute("""
+        UPDATE shop_settings
+        SET shop_name = ?, currency = ?, tax_rate = ?, 
+            address = ?, contact_number = ?, delete_grace_period = ?
+        WHERE id = 1
+    """, (shop_name, currency, tax_rate, address, contact, grace))
+    
+    db.commit()
+    
+    # Flash a message to the user
+    import flask
+    flask.flash("Settings updated successfully!")
+    
+    # Redirect back to the settings page
+    return flask.redirect("/settings")
 
 # --- 4. POS & INVENTORY ---
 @app.route("/dashboard")
 @login_required
 def dashboard():
     db = get_db()
-    shop_info = db.execute("SELECT * FROM shop_settings WHERE id = 1").fetchone()
-    products = db.execute("SELECT * FROM products WHERE quantity > 0 AND is_active = 1").fetchall()
-    return render_template("dashboard.html", user=session['user'], role=session['role'], 
-                           shop_info=dict(shop_info) if shop_info else {"shop_name": "My Shop"}, 
-                           products=[dict(p) for p in products])
+    
+    # --- 1. FIX: Fetch the shop information so 'shop_info' exists! ---
+    # We fetch the first row from your settings/shop table
+    shop_info = db.execute("SELECT * FROM shop_settings LIMIT 1").fetchone()
+    
+    # --- 2. Your existing product logic ---
+    products = db.execute("SELECT * FROM products WHERE quantity > 0").fetchall()
+    
+    # --- 3. Return everything together ---
+    return render_template(
+        "dashboard.html", 
+        user=session.get('user', 'Staff'), 
+        role=session.get('role', 'User'), 
+        shop=dict(shop_info) if shop_info else {}, # Now shop_info is defined!
+        products=[dict(p) for p in products]
+    )
 
 
 @app.route("/settle_payment", methods=["POST"])
@@ -207,6 +299,11 @@ def dashboard():
 def settle_payment():
     data = request.json
     db = get_db()
+    
+    # 1. Fetch the official tax rate from settings
+    settings = get_shop_settings()
+    tax_rate = settings['tax_rate'] if settings else 0.0
+
     try:
         db.execute("BEGIN")
         subtotal = 0
@@ -222,13 +319,20 @@ def settle_payment():
             subtotal += line_price
             cart_items.append((item['id'], item['qty'], line_price))
 
-        vat_amount = subtotal * (data.get('vat_percent', 0) / 100)
+        # 2. Use the dynamic tax rate
+        vat_amount = subtotal * (tax_rate / 100)
         final_total = subtotal + vat_amount - data.get('discount', 0)
 
         for i, (p_id, qty, price) in enumerate(cart_items):
-            g_total = final_total if i == 0 else 0.0 # Store grand total only on the first item of the transaction
-            db.execute("INSERT INTO sales (product_id, quantity, total_price, grand_total, vat_amount, discount, user_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                       (p_id, qty, price, g_total, vat_amount if i==0 else 0, data.get('discount', 0) if i==0 else 0, session.get('user_id')))
+            # Only store totals on the first row of the transaction to avoid double-counting
+            g_total = final_total if i == 0 else 0.0 
+            v_amt = vat_amount if i == 0 else 0.0
+            disc = data.get('discount', 0) if i == 0 else 0.0
+            
+            db.execute('''INSERT INTO sales 
+                (product_id, quantity, total_price, grand_total, vat_amount, discount, user_id) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                (p_id, qty, price, g_total, v_amt, disc, session.get('user_id')))
 
         db.commit()
         last_id = db.execute("SELECT id FROM sales ORDER BY id DESC LIMIT 1").fetchone()
@@ -236,6 +340,7 @@ def settle_payment():
     except Exception as e:
         db.rollback()
         return jsonify({"status": "error", "message": str(e)}), 400
+
         
 @app.route("/inventory")
 @login_required
@@ -276,22 +381,23 @@ def edit_product():
 @login_required
 @admin_required
 def delete_product(product_id):
-    db = get_db()
-    DAYS_LIMIT = 7 
+    db = get_db() # Fixed: Added missing db connection
+    
+    # 1. Fetch your custom grace period from settings
+    settings = get_shop_settings()
+    DAYS_LIMIT = settings['delete_grace_period'] if settings else 7 
 
     try:
-        # 1. Fetch the product
+        # 2. Fetch the product
         product = db.execute("SELECT name, date_added FROM products WHERE id = ?", (product_id,)).fetchone()
         
         if not product:
             flash("Product not found!")
             return redirect(url_for('inventory'))
 
-        # 2. Safe Date Parsing
+        # 3. Parse Date Safely
         added_date_str = product['date_added']
         added_date = None
-        
-        # Try different common SQLite formats to prevent a crash
         for fmt in ('%Y-%m-%d %H:%M:%S', '%Y-%m-%d %H:%M', '%Y-%m-%d'):
             try:
                 added_date = datetime.strptime(added_date_str, fmt)
@@ -300,28 +406,27 @@ def delete_product(product_id):
                 continue
 
         if not added_date:
-            flash("Error: Could not determine product age. Deletion blocked for safety.")
+            flash("Error: Could not determine product age.")
             return redirect(url_for('inventory'))
 
-        # 3. Calculate Age
+        # 4. Calculate Age (Using UTC to match your init_db 'now')
         age_in_days = (datetime.utcnow() - added_date).days
 
-        # 4. Security Check
+        # 5. The "Business Logic" Check
         if age_in_days >= DAYS_LIMIT:
-            flash(f"Security Policy: '{product['name']}' is {age_in_days} days old. "
-                  f"Items older than {DAYS_LIMIT} days cannot be deleted to preserve sales history.")
+            flash(f"Security: '{product['name']}' is {age_in_days} days old. "
+                  f"Limit is {DAYS_LIMIT} days. Please Archive instead.")
             return redirect(url_for('inventory'))
 
-        # 5. Final Deletion Attempt
+        # 6. Delete
         db.execute("DELETE FROM products WHERE id = ?", (product_id,))
         db.commit()
         flash(f"Successfully deleted '{product['name']}'.")
 
     except sqlite3.IntegrityError:
-        flash("Database Error: This product is linked to existing sales and cannot be deleted.")
+        flash("Database Error: Item has sales history and cannot be deleted.")
     except Exception as e:
-        print(f"Delete Error: {e}") 
-        flash(f"An unexpected error occurred: {str(e)}")
+        flash(f"Error: {str(e)}")
         
     return redirect(url_for('inventory'))
 
@@ -562,27 +667,32 @@ def top_products():
     top_items = db.execute(query).fetchall()
     return jsonify([dict(ix) for ix in top_items])
 
-
-@app.route("/register", methods=["GET", "POST"]) # Changed to match your HTML action
+@app.route("/register", methods=["GET", "POST"])
 @login_required
 @admin_required
 def register():
+    db = get_db()
     if request.method == "POST":
         username = request.form.get("username")
         password = request.form.get("password")
         role = request.form.get("role")
         
-        db = get_db()
         try:
+            # Note: Ensure 'password_hash' is the correct column name in your table
             db.execute("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
                        (username, generate_password_hash(password), role))
             db.commit()
             flash(f"Staff member {username} registered successfully!")
-            return redirect(url_for('register')) # Stay on page to see success msg
+            return redirect(url_for('register'))
         except sqlite3.IntegrityError:
             flash("Username already exists!")
-            
-    return render_template("register.html")
+            pass
+    # --- NEW: Fetch all users to display them on the page ---
+    staff_list = db.execute("SELECT id, username, role FROM users").fetchall()
+    
+    # Pass 'staff' to the template
+    return render_template("register.html", staff=staff_list)
+
 
 if __name__ == "__main__":
     init_db()

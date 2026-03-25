@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Inventory Management</title>
+    <title>Inventory Management - {{ shop.shop_name }}</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; height: 100vh; background: #f0f2f5; }
         .sidebar { width: 250px; background: #2c3e50; color: white; padding: 20px; }
@@ -10,112 +10,105 @@
         table { width: 100%; border-collapse: collapse; background: white; }
         th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; }
         th { background: #34495e; color: white; font-size: 13px; text-transform: uppercase; }
-        .btn { padding: 8px 12px; border: none; border-radius: 4px; color: white; cursor: pointer; text-decoration: none; display: inline-block; font-size: 13px; }
+        
+        .btn { padding: 8px 12px; border: none; border-radius: 4px; color: white; cursor: pointer; text-decoration: none; display: inline-block; font-size: 13px; font-weight: bold; }
         .bg-green { background: #27ae60; } 
         .bg-orange { background: #f39c12; }
-        input { padding: 8px; margin-right: 10px; border: 1px solid #ddd; border-radius: 4px; }
+        .bg-red { background: #e74c3c; }
+        .bg-dark { background: #34495e; }
         
+        input { padding: 8px; margin-right: 10px; border: 1px solid #ddd; border-radius: 4px; }
         .search-container { margin-bottom: 15px; display: flex; align-items: center; }
-        .search-input { width: 100%; max-width: 400px; padding: 12px; border: 2px solid #3498db; outline: none; font-size: 16px; }
+        .search-input { width: 100%; max-width: 400px; padding: 12px; border: 2px solid #00AEEF; outline: none; font-size: 16px; border-radius: 4px; }
         .timestamp { font-size: 11px; color: #7f8c8d; }
 
-        /* The Modal (background) */
-        .modal {
-           display: none; 
-            position: fixed; 
-            z-index: 1000; 
-            left: 0; top: 0;
-            width: 100%; height: 100%;
-            background-color: rgba(0,0,0,0.5); 
-        }
-
-        /* Modal Content */
-        .modal-content {
-           background-color: white;
-            margin: 10% auto;
-            padding: 20px;
-            border-radius: 8px;
-            width: 400px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-        }
-
+        /* MODAL STYLES */
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
+        .modal-content { background-color: white; margin: 10% auto; padding: 25px; border-radius: 8px; width: 400px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
         .modal-header { border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 15px; }
         .modal-footer { border-top: 1px solid #eee; padding-top: 15px; margin-top: 15px; text-align: right; }
+        .modal label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 5px; color: #7f8c8d; }
+        .modal input { width: 95%; display: block; margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
 
-        .modal input { width: 90%; display: block; margin-bottom: 15px; padding: 10px; }
-        th:last-child, td:last-child {
-        min-width: 140px;
-        text-align: center; /* Optional: makes the buttons look centered */}
+        .badge-staff { background: #eee; color: #7f8c8d; padding: 2px 8px; border-radius: 10px; font-size: 10px; text-transform: uppercase; }
     </style>
 </head>
 <body>
     <div class="sidebar">
-        <h3>Stock Management</h3>
-        <hr>
+        <h3 style="color: #00AEEF;">{{ shop.shop_name }}</h3>
+        <p style="font-size: 12px; color: #bdc3c7;">Role: {{ session['role'] }}</p>
+        <hr style="border: 0.5px solid #34495e;">
+        
         <a href="/dashboard" style="color:white; text-decoration: none;"><p>🏠 POS Dashboard</p></a>
-        <p><strong>📦 Inventory</strong></p>
+        <p style="color: #00AEEF;"><strong>📦 Inventory</strong></p>
 
         {% if session['role'] == 'Admin' %}
             <a href="/cash" style="color:white; text-decoration: none;"><p>💰 Cash Management</p></a>
             <a href="/sales" style="color:white; text-decoration: none;"><p>📊 Sales History</p></a>
-            <a href="/register" style="color:white; text-decoration: none;"><p>👤 Register Staff</p></a>
             <a href="/reports" style="color:white; text-decoration: none;"><p>📊 Financial Reports</p></a>
-            <a href="/restock_history" style="color:white; text-decoration: none;"><p>📜 Restock History</p></a>
+            <a href="/register" style="color:white; text-decoration: none;"><p>👤 Register Staff</p></a>
+            <a href="/settings" style="color:white; text-decoration: none;"><p>⚙️ Shop Settings</p></a>
         {% endif %}
 
-        <hr>
+        <hr style="border: 0.5px solid #34495e;">
         <a href="/change_password" style="color:white; text-decoration: none;"><p>🔒 Change Password</p></a>
         <a href="/logout" style="color:#ff7675; text-decoration: none;">Logout</a>
     </div>
+
+    {% if session['role'] == 'Admin' %}
     <div id="editModal" class="modal">
-    <div class="modal-content">
-        <div class="modal-header"><h2>Edit Product</h2></div>
-        <input type="hidden" id="edit-id">
-        <label>Product Name</label>
-        <input type="text" id="edit-name">
-        <label>Selling Price</label>
-        <input type="number" step="0.01" id="edit-price">
-        <label>Current Quantity</label>
-        <input type="number" id="edit-qty">
-        <div class="modal-footer">
-            <button class="btn" onclick="closeModal()" style="background:#95a5a6;">Cancel</button>
-            <button class="btn bg-green" onclick="saveEdit()">Save Changes</button>
+        <div class="modal-content">
+            <div class="modal-header"><h2>Edit Product</h2></div>
+            <input type="hidden" id="edit-id">
+            
+            <label>Product Name</label>
+            <input type="text" id="edit-name">
+            
+            <label>Selling Price ({{ shop.currency }})</label>
+            <input type="number" step="0.01" id="edit-price">
+            
+            <label>Current Quantity</label>
+            <input type="number" id="edit-qty">
+            
+            <div class="modal-footer">
+                <button class="btn bg-dark" onclick="closeModal()">Cancel</button>
+                <button class="btn bg-green" onclick="saveEdit()">Save Changes</button>
+            </div>
         </div>
     </div>
-</div>
+    {% endif %}
 
     <div class="main">
         {% with messages = get_flashed_messages() %}
             {% if messages %}
                 {% for message in messages %}
-                    <div style="padding: 10px; margin-bottom: 20px; background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; border-radius: 4px;">
+                    <div class="flash-msg" style="padding: 15px; margin-bottom: 20px; background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; border-radius: 4px;">
                         {{ message }}
                     </div>
                 {% endfor %}
             {% endif %}
         {% endwith %}
 
-        <h1> Inventory</h1>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h1>Inventory Management</h1>
+            <span class="badge-staff">Mode: {{ session['role'] }}</span>
+        </div>
         
         {% if session['role'] == 'Admin' %}
         <div class="card">
-            <h3>Add New Product</h3>
-            <form action="/add_product" method="POST">
-                <input type="text" name="name" placeholder="Product Name" required>
-                <input type="number" step="0.01" name="price" placeholder="Selling Price" required>
-                <input type="number" name="quantity" placeholder="Qty" required>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <button type="submit" class="btn bg-green">Add to Stock</button>
-                    <a href="/restock_history" class="btn" style="background: #34495e;">View Restock History</a>
-                </div>
+            <h3 style="margin-top: 0;">Add New Product</h3>
+            <form action="/add_product" method="POST" style="display: flex; flex-wrap: wrap; gap: 10px;">
+                <input type="text" name="name" placeholder="Product Name" style="flex: 2;" required>
+                <input type="number" step="0.01" name="price" placeholder="Price ({{ shop.currency }})" style="flex: 1;" required>
+                <input type="number" name="quantity" placeholder="Qty" style="flex: 0.5;" required>
+                <button type="submit" class="btn bg-green">Add to Stock</button>
             </form>
-            
         </div>
         {% endif %}
 
         <div class="card">
             <div class="search-container">
-                <input type="text" id="inventorySearch" class="search-input" placeholder="🔍 Search inventory...">
+                <input type="text" id="inventorySearch" class="search-input" placeholder="🔍 Search inventory by product name...">
             </div>
 
             <table id="inventoryTable">
@@ -123,10 +116,10 @@
                     <tr>
                         <th>ID</th>
                         <th>Product Name</th>
-                        <th>Price</th>
+                        <th>Price ({{ shop.currency }})</th>
                         <th>Stock Level</th>
-                        <th>Date Added</th>
-                        {% if session['role'] == 'Admin' %}<th>Actions</th>{% endif %}
+                        <th>Last Updated</th>
+                        {% if session['role'] == 'Admin' %}<th style="text-align: center;">Actions</th>{% endif %}
                     </tr>
                 </thead>
                 <tbody>
@@ -134,16 +127,21 @@
                     <tr class="product-row">
                         <td>{{ product.id }}</td>
                         <td class="product-name"><strong>{{ product.name }}</strong></td>
-                        <td>${{ "{:.2f}".format(product.sell_price) }}</td>
-                        <td>{{ product.quantity }}</td>
+                        <td>{{ "{:.2f}".format(product.sell_price) }}</td>
+                        <td>
+                            <span style="font-weight: bold; color: {{ '#e74c3c' if product.quantity <= 5 else '#2c3e50' }}">
+                                {{ product.quantity }}
+                            </span>
+                        </td>
                         <td class="timestamp">{{ product.date_added }}</td>
+                        
                         {% if session['role'] == 'Admin' %}
                         <td>
-                             <div style="display: flex; gap: 5px;">
+                            <div style="display: flex; gap: 8px; justify-content: center;">
                                 <button class="btn bg-orange" onclick="editProduct('{{ product.id }}', '{{ product.name }}', '{{ product.sell_price }}', '{{ product.quantity }}')">Edit</button>
-        
-                                <form action="/delete_product/{{ product.id }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this product? This cannot be undone.');">
-                                   <button type="submit" class="btn" style="background: #e74c3c;">Delete</button>
+                                
+                                <form action="/delete_product/{{ product.id }}" method="POST" onsubmit="return confirm('Are you sure? This cannot be undone.');">
+                                    <button type="submit" class="btn bg-red">Delete</button>
                                 </form>
                             </div>
                         </td>
@@ -156,6 +154,7 @@
     </div>
 
     <script>
+        /* SEARCH FILTER */
         document.getElementById('inventorySearch').addEventListener('keyup', function() {
             let filter = this.value.toLowerCase();
             let rows = document.querySelectorAll('.product-row');
@@ -165,61 +164,58 @@
             });
         });
 
-        function editProduct(id, name, price, qty) {
-    // Fill the modal fields with current data
-    document.getElementById('edit-id').value = id;
-    document.getElementById('edit-name').value = name;
-    document.getElementById('edit-price').value = price;
-    document.getElementById('edit-qty').value = qty;
-    
-    // Show the modal
-    document.getElementById('editModal').style.display = "block";
-    }
-
-    // Auto-hide flash messages after 3 seconds
-    setTimeout(function() {
-        // Select all divs inside the 'main' class that are flash messages
-        let flashMessages = document.querySelectorAll('.main > div[style*="padding: 10px"]');
-        flashMessages.forEach(msg => {
-            // Smoothly fade out before hiding
-            msg.style.transition = "opacity 0.5s ease";
-            msg.style.opacity = "0";
-            setTimeout(() => msg.remove(), 500); // Remove from the page entirely
-        });
+        /* FLASH MESSAGE AUTO-HIDE */
+        setTimeout(function() {
+            let flashMessages = document.querySelectorAll('.flash-msg');
+            flashMessages.forEach(msg => {
+                msg.style.transition = "opacity 0.5s ease";
+                msg.style.opacity = "0";
+                setTimeout(() => msg.remove(), 500);
+            });
         }, 3000);
 
-    function closeModal() {
-        document.getElementById('editModal').style.display = "none";
-    }
+        /* MODAL LOGIC (ONLY LOADS IF ADMIN) */
+        {% if session['role'] == 'Admin' %}
+        function editProduct(id, name, price, qty) {
+            document.getElementById('edit-id').value = id;
+            document.getElementById('edit-name').value = name;
+            document.getElementById('edit-price').value = price;
+            document.getElementById('edit-qty').value = qty;
+            document.getElementById('editModal').style.display = "block";
+        }
 
-    function saveEdit() {
-        const data = {
-            id: document.getElementById('edit-id').value,
-            name: document.getElementById('edit-name').value,
-            price: parseFloat(document.getElementById('edit-price').value),
-            quantity: parseInt(document.getElementById('edit-qty').value)
-        };
+        function closeModal() {
+            document.getElementById('editModal').style.display = "none";
+        }
 
-        fetch('/edit_product', {
-           method: 'POST',
-           headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify(data)
-       })
-       .then(res => res.json())
-       .then(data => {
-           if(data.status === 'success') {
-                location.reload();
-            } else {
-                alert("Error: " + data.message);
-            }
-         });
-    }
+        function saveEdit() {
+            const data = {
+                id: document.getElementById('edit-id').value,
+                name: document.getElementById('edit-name').value,
+                price: parseFloat(document.getElementById('edit-price').value),
+                quantity: parseInt(document.getElementById('edit-qty').value)
+            };
 
-    // Close modal if user clicks outside of it
-    window.onclick = function(event) {
-        let modal = document.getElementById('editModal');
-        if (event.target == modal) closeModal();
-    }
+            fetch('/edit_product', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.status === 'success') {
+                    location.reload();
+                } else {
+                    alert("Error: " + data.message);
+                }
+            });
+        }
+
+        window.onclick = function(event) {
+            let modal = document.getElementById('editModal');
+            if (event.target == modal) closeModal();
+        }
+        {% endif %}
     </script>
 </body>
 </html>
