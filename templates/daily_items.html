@@ -84,6 +84,10 @@
                 <td>{{ item.total_sold or 0 }}</td>
                 <td>{{ item.quantity }}</td>
                 <td>
+                    <a href="/print_receipt/{{ item.transaction_id }}" target="_blank" 
+                       style="color: #3498db; text-decoration: none; font-weight: bold;">
+                       📄 View Receipt  
+                    </a>
                     {% if item.quantity <= item.min_stock_level %}
                         <span class="badge-reorder">REORDER NOW</span>
                     {% else %}

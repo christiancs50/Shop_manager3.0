@@ -68,7 +68,8 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, 
             product_id INTEGER,
             quantity INTEGER DEFAULT 1,
-            total_price REAL, 
+            total_price REAL,
+            transaction_id INTEGER, 
             grand_total REAL DEFAULT 0.0,
             vat_amount REAL DEFAULT 0.0,
             discount REAL DEFAULT 0.0,
@@ -293,55 +294,81 @@ def dashboard():
         products=[dict(p) for p in products]
     )
 
-
 @app.route("/settle_payment", methods=["POST"])
 @login_required
 def settle_payment():
     data = request.json
     db = get_db()
     
-    # 1. Fetch the official tax rate from settings
+    # The Bridge ID: Unique for this specific customer's pile of items
+    import time
+    transaction_group_id = int(time.time()) 
+
     settings = get_shop_settings()
     tax_rate = settings['tax_rate'] if settings else 0.0
 
     try:
-        db.execute("BEGIN")
         subtotal = 0
         cart_items = []
 
+        # Process each item
         for item in data['cart']:
-            prod = db.execute("SELECT name, sell_price, quantity FROM products WHERE id=? AND is_active=1", (item['id'],)).fetchone()
-            if not prod or prod['quantity'] < item['qty']:
-                raise Exception(f"Stock issue with {prod['name'] if prod else 'Item'}")
+            prod = db.execute("SELECT name, sell_price, quantity FROM products WHERE id=?", (item['id'],)).fetchone()
             
+            # Update Stock
             db.execute("UPDATE products SET quantity = quantity - ? WHERE id=?", (item['qty'], item['id']))
-            line_price = prod['sell_price'] * item['qty']
-            subtotal += line_price
-            cart_items.append((item['id'], item['qty'], line_price))
+            
+            line_total = prod['sell_price'] * item['qty']
+            subtotal += line_total
+            cart_items.append((item['id'], item['qty'], line_total))
 
-        # 2. Use the dynamic tax rate
-        vat_amount = subtotal * (tax_rate / 100)
-        final_total = subtotal + vat_amount - data.get('discount', 0)
+        # Calculate Totals
+        vat_val = subtotal * (data.get('vat_percent', 0) / 100)
+        discount_val = data.get('discount', 0)
+        final_total = subtotal + vat_val - discount_val
 
-        for i, (p_id, qty, price) in enumerate(cart_items):
-            # Only store totals on the first row of the transaction to avoid double-counting
-            g_total = final_total if i == 0 else 0.0 
-            v_amt = vat_amount if i == 0 else 0.0
-            disc = data.get('discount', 0) if i == 0 else 0.0
+        # Save to database
+        for i, row in enumerate(cart_items):
+            # We save the 'grand_total' only on the first row to prevent 
+            # reports from double-counting the total sale.
+            g_total = final_total if i == 0 else 0 
             
             db.execute('''INSERT INTO sales 
-                (product_id, quantity, total_price, grand_total, vat_amount, discount, user_id) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)''',
-                (p_id, qty, price, g_total, v_amt, disc, session.get('user_id')))
+                (product_id, quantity, total_price, transaction_id, user_id, grand_total, timestamp) 
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)''',
+                (row[0], row[1], row[2], transaction_group_id, session.get('user_id'), g_total))
 
         db.commit()
-        last_id = db.execute("SELECT id FROM sales ORDER BY id DESC LIMIT 1").fetchone()
-        return jsonify({"status": "success", "total": round(final_total, 2), "trans_id": last_id['id']})
+
+        # Send the Bridge ID back to the Frontend
+        return jsonify({
+            "status": "success", 
+            "trans_id": transaction_group_id
+        })
     except Exception as e:
         db.rollback()
         return jsonify({"status": "error", "message": str(e)}), 400
 
-        
+@app.route("/print_receipt/<int:trans_id>")
+@login_required
+def print_receipt(trans_id):
+    db = get_db()
+    # Fetch the sales items
+    items = db.execute('''
+        SELECT s.*, p.name as p_name 
+        FROM sales s 
+        JOIN products p ON s.product_id = p.id 
+        WHERE s.transaction_id = ?
+    ''', (trans_id,)).fetchall()
+
+    if not items:
+        flash("Receipt not found.")
+        return redirect(url_for('dashboard'))
+
+    shop = get_shop_settings()
+    return render_template("receipt_thermal.html", items=items, shop=shop)
+
+
 @app.route("/inventory")
 @login_required
 def inventory():
@@ -692,6 +719,19 @@ def register():
     
     # Pass 'staff' to the template
     return render_template("register.html", staff=staff_list)
+
+@app.route("/get_last_transaction_id")
+@login_required
+def get_last_transaction_id():
+    db = get_db()
+    # 1. You must assign the result of the query to 'last_sale'
+    last_sale = db.execute("SELECT transaction_id FROM sales ORDER BY id DESC LIMIT 1").fetchone()
+    
+    # 2. Now 'last_sale' is defined and can be checked
+    if last_sale:
+        return jsonify({"id": last_sale['transaction_id']})
+    
+    return jsonify({"id": None})
 
 
 if __name__ == "__main__":

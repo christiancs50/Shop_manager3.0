@@ -31,6 +31,19 @@
         .modal input { width: 95%; display: block; margin-bottom: 15px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
 
         .badge-staff { background: #eee; color: #7f8c8d; padding: 2px 8px; border-radius: 10px; font-size: 10px; text-transform: uppercase; }
+
+        /* PRINT STYLES */
+        @media print {
+            .sidebar, .search-container, .btn, .badge-staff, .card:first-of-type, .flash-msg { 
+                display: none !important; 
+            }
+            .main { padding: 0; margin: 0; }
+            .card { box-shadow: none; border: none; padding: 0; }
+            body { background: white; }
+            table { border: 1px solid #000; }
+            th { background: #eee !important; color: black !important; border: 1px solid #000; }
+            td { border: 1px solid #000; }
+        }
     </style>
 </head>
 <body>
@@ -88,13 +101,18 @@
                 {% endfor %}
             {% endif %}
         {% endwith %}
-
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h1>Inventory Management</h1>
-            <span class="badge-staff">Mode: {{ session['role'] }}</span>
+                
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <div>
+                <h1 style="margin: 0;">Inventory Management</h1>
+                <span class="badge-staff">Mode: {{ session['role'] }}</span>
+            </div>
+            <button onclick="window.print()" class="btn bg-dark" style="display: flex; align-items: center; gap: 8px;">
+                <span>🖨️ Print Inventory List</span>
+            </button>
         </div>
         
-        {% if session['role'] == 'Admin' %}
+            {% if session['role'] == 'Admin' %}
         <div class="card">
             <h3 style="margin-top: 0;">Add New Product</h3>
             <form action="/add_product" method="POST" style="display: flex; flex-wrap: wrap; gap: 10px;">
@@ -211,6 +229,8 @@
             });
         }
 
+        document.getElementById('print-date').innerText = new Date().toLocaleString();
+        
         window.onclick = function(event) {
             let modal = document.getElementById('editModal');
             if (event.target == modal) closeModal();

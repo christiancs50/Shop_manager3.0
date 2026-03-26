@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { 
+            width: 74mm; 
+            font-family: 'Courier New', monospace; 
+            font-size: 12px; 
+            margin: 0; 
+            padding: 10px; 
+        }
+        .text-center { text-align: center; }
+        .dashed-line { border-bottom: 1px dashed #000; margin: 8px 0; }
+        
+        table { width: 100%; border-collapse: collapse; }
+        
+        .item-column { 
+            text-align: left; 
+            word-wrap: break-word; 
+            max-width: 45mm; 
+            vertical-align: top; 
+            padding-bottom: 3px;
+        }
+        
+        .price-column { 
+            text-align: right; 
+            vertical-align: top; 
+        }
+        
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 3px;
+        }
+
+        .total-font { font-weight: bold; font-size: 15px; }
+        
+        @media print { .no-print { display: none; } }
+    </style>
+</head>
+<body onload="window.print(); setTimeout(() => { window.close(); }, 800);">
+
+    <div class="text-center">
+        <h2 style="margin:0;">{{ shop.shop_name }}</h2>
+        <p>{{ shop.address }}<br>Tel: {{ shop.contact_number }}</p>
+    </div>
+    
+    <div class="dashed-line"></div>
+    <p>
+        Trans ID: {{ items[0].transaction_id }}<br>
+        Date: {{ items[0].sale_date }}<br>
+        Staff: {{ session.get('user', 'Terminal 1') }}
+    </p>
+    <div class="dashed-line"></div>
+
+    <table>
+        <thead>
+            <tr style="border-bottom: 1px solid #000;">
+                <th style="text-align:left;">Item</th>
+                <th style="text-align:right;">Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td class="item-column">
+                    {{ item.p_name }} (x{{ item.quantity }})
+                </td>
+                <td class="price-column">
+                    {{ "%.2f"|format(item.total_price) }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="dashed-line"></div>
+    
+    <div class="summary-row">
+        <span>Sub-Total:</span>
+        <span>{{ shop.currency }} {{ "%.2f"|format(items[0].grand_total - items[0].vat_amount + items[0].discount) }}</span>
+    </div>
+
+    <div class="summary-row">
+        <span>VAT:</span>
+        <span>{{ shop.currency }} {{ "%.2f"|format(items[0].vat_amount) }}</span>
+    </div>
+
+    {% if items[0].discount and items[0].discount > 0 %}
+    <div class="summary-row" style="font-style: italic;">
+        <span>Discount:</span>
+        <span>-{{ shop.currency }} {{ "%.2f"|format(items[0].discount) }}</span>
+    </div>
+    {% endif %}
+
+    <div class="dashed-line"></div>
+
+    <div class="summary-row total-font">
+        <span>TOTAL {{ shop.currency }}:</span>
+        <span>{{ "%.2f"|format(items[0].grand_total) if items[0].grand_total else "0.00" }}</span>
+    </div>
+
+    <div class="dashed-line"></div>
+
+    <div class="text-center" style="margin-top:15px;">
+        <p>Thank you for your business!</p>
+        <p style="font-size: 8px; color: #555;">No Refund Without Receipt</p>
+    </div>
+
+    <div class="text-center no-print" style="margin-top: 10px;">
+        <button onclick="window.close()" style="font-size: 10px; cursor: pointer; padding: 5px 10px;">Close Window</button>
+    </div>
+
+</body>
+</html>

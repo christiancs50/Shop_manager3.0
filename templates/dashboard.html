@@ -153,9 +153,9 @@
                 </div>
 
                 <div class="summary-section">
-                    <div class="summary-row">
-                        <span class="summary-label">Subtotal:</span>
-                        <span class="summary-value" id="summary-subtotal">{{ shop.currency }} 0.00</span>
+                    <div class="summary-row" style="font-size: 1.4em; border-top: 1px solid #eee; margin-top: 5px; padding-top: 10px;">
+                        <span class="summary-label">subtotal:</span>
+                        <span class="summary-value" style="color: #27ae60;">{{ shop.currency }} <span id="summary-subtotal">0.00</span></span>
                     </div>
                     <div class="summary-row">
                         <span class="summary-label">VAT (<span id="vat-rate-label">{{ shop.tax_rate }}</span>%):</span>
@@ -173,6 +173,7 @@
                 <button class="btn btn-discount" onclick="addDiscount()">Add Discount</button>
                 <button class="btn btn-clear" onclick="clearCart()">Clear Cart</button>
                 <button class="btn" onclick="window.location.href='/reports/daily_items'" style="background: #6610f2;">📋 Daily Items Sold</button>
+                <button class="btn" onclick="reprintLast()" style="background: #34495e;">Reprint Last Sale</button>
     
                 <div style="margin-top: auto; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; height: 100px; background: white;">
                     <div style="background: #f8f9fa; padding: 5px; font-size: 10px; font-weight: bold; color: #7f8c8d; text-align: center; border-bottom: 1px solid #ddd;">
@@ -221,21 +222,22 @@
         <div style="text-align: center; margin-top: 20px; font-size: 11px;"><p>Thank you for shopping!</p></div>
     </div>
 
-    <script>
+<script>
     const CURRENCY = "{{ shop.currency }} ";
     const el = id => document.getElementById(id);
-    
+
     // VAT Setup
     const DEFAULT_VAT = {{ shop.tax_rate|default(0) }};
     let currentVatPercent = DEFAULT_VAT;
     let discount = 0;
     let cart = [];
+    let lastTransactionId;
     let products = {{ products|tojson|safe if products else '[]' }};
 
     /* INITIALIZE UI */
     document.addEventListener('DOMContentLoaded', () => {
         updateClock();
-        applyVat(); // Set initial button state to 'ON'
+        applyVat(); 
         renderCart();
     });
 
@@ -250,26 +252,20 @@
     function applyVat() {
         currentVatPercent = DEFAULT_VAT;
         if(el('vat-rate-label')) el('vat-rate-label').innerText = currentVatPercent;
-
-        // Button Styles
         el('btnVatOn').style.background = "#27ae60";
         el('btnVatOn').style.color = "white";
         el('btnVatOff').style.background = "#eee";
         el('btnVatOff').style.color = "#333";
-
         renderCart();
     }
 
     function removeVat() {
         currentVatPercent = 0;
         if(el('vat-rate-label')) el('vat-rate-label').innerText = "0";
-
-        // Button Styles
         el('btnVatOff').style.background = "#e74c3c";
         el('btnVatOff').style.color = "white";
         el('btnVatOn').style.background = "#eee";
         el('btnVatOn').style.color = "#333";
-
         renderCart();
     }
 
@@ -326,6 +322,7 @@
         }
     }
 
+    /* FIXED RENDERCART FUNCTION */
     function renderCart() {
         let subtotal = 0;
         let html = '';
@@ -345,6 +342,7 @@
         const total = Math.max(0, subtotal + vat - discount);
 
         el('cart-body').innerHTML = html;
+        // FIXED ERROR: Added backticks and CURRENCY variable
         el('summary-subtotal').innerText = `${CURRENCY}${subtotal.toFixed(2)}`;
         el('summary-vat').innerText = `${CURRENCY}${vat.toFixed(2)}`;
         el('top-total').innerText = total.toFixed(2);
@@ -357,13 +355,9 @@
         }
     }
 
-    /* SETTLE PAYMENT */
     function settle() {
         if (!cart.length) return alert("Cart is empty");
-
-        const subtotalVal = cart.reduce((acc, item) => acc + (item.sell_price * item.qty), 0);
-        const vatVal = +(subtotalVal * currentVatPercent / 100).toFixed(2);
-        const finalTotal = (subtotalVal + vatVal - discount).toFixed(2);
+        if (!confirm("Confirm Payment and Print Receipt?")) return;
 
         fetch('/settle_payment', {
             method: 'POST',
@@ -374,34 +368,42 @@
                 discount: discount
             })
         })
-        .then(r => r.json())
+        .then(response => response.json())
         .then(data => {
             if (data.status === 'success') {
-                el('r-id').innerText = data.trans_id || "N/A";
-                el('r-date').innerText = new Date().toLocaleString('en-GB');
-                el('r-subtotal').innerText = subtotalVal.toFixed(2);
-                el('r-vat-rate').innerText = currentVatPercent;
-                el('r-vat-amount').innerText = vatVal.toFixed(2);
-                el('r-total').innerText = finalTotal;
-
-                if (discount > 0) {
-                    el('r-discount-row-print').style.display = 'flex';
-                    el('r-discount').innerText = discount.toFixed(2);
-                }
-                
-                let itemsHtml = '';
-                cart.forEach(item => {
-                    itemsHtml += `<tr><td>${item.name} x${item.qty}</td><td style="text-align:right;">${(item.sell_price * item.qty).toFixed(2)}</td></tr>`;
-                });
-                el('r-items-list').innerHTML = itemsHtml;
-
-                window.print();
-                alert("Sale recorded successfully!");
-                location.reload(); 
+                lastTransactionId = data.trans_id;
+                const receiptUrl = '/print_receipt/' + data.trans_id;
+                window.open(receiptUrl, 'ReceiptWindow', 'width=400,height=600');
+                cart = []; 
+                discount = 0;
+                renderCart();
+                el('productSearch').focus();
             } else {
                 alert("Error: " + data.message);
             }
-        });
+        })
+        .catch(err => alert("System Error: " + err));
+    }
+
+    function reprintLast() {
+        const receiptWindow = window.open('', 'ReceiptWindow', 'width=400,height=600');
+        receiptWindow.document.write("Loading receipt...");
+
+        fetch('/get_last_transaction_id')
+            .then(res => res.json())
+            .then(data => {
+                if (data.id) {
+                    const url = '/print_receipt/' + data.id; 
+                    receiptWindow.location.href = url;
+                } else {
+                    receiptWindow.close(); 
+                    alert("No transactions found.");
+                }
+            })
+            .catch(err => {
+                receiptWindow.close();
+                alert("Could not fetch last transaction.");
+            });
     }
 
     /* KEYBOARD SHORTCUTS */
