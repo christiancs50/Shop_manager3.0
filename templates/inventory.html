@@ -57,9 +57,10 @@
 
         {% if session['role'] == 'Admin' %}
             <a href="/cash" style="color:white; text-decoration: none;"><p>💰 Cash Management</p></a>
-            <a href="/sales" style="color:white; text-decoration: none;"><p>📊 Sales History</p></a>
+            <a href="/sales?filter=today" style="color: #ffffff; text-decoration: none;"><p>📅 Daily Sales</p></a>
             <a href="/reports" style="color:white; text-decoration: none;"><p>📊 Financial Reports</p></a>
             <a href="/register" style="color:white; text-decoration: none;"><p>👤 Register Staff</p></a>
+            <a href="/sales" style="color:white; text-decoration: none;"><p>📊 Sales History</p></a>
             <a href="/settings" style="color:white; text-decoration: none;"><p>⚙️ Shop Settings</p></a>
         {% endif %}
 
@@ -118,7 +119,7 @@
             <form action="/add_product" method="POST" style="display: flex; flex-wrap: wrap; gap: 10px;">
                 <input type="text" name="name" placeholder="Product Name" style="flex: 2;" required>
                 <input type="number" step="0.01" name="price" placeholder="Price ({{ shop.currency }})" style="flex: 1;" required>
-                <input type="number" name="quantity" placeholder="Qty" style="flex: 0.5;" required>
+                <input type="number" name="quantity" min="0" placeholder="Qty" style="flex: 0.5;" required>
                 <button type="submit" class="btn bg-green">Add to Stock</button>
             </form>
         </div>

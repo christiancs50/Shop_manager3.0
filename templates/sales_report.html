@@ -34,11 +34,25 @@
 </head>
 <body>
     <div class="sidebar">
-        <h3>POS SYSTEM</h3>
-        <hr>
+        <h3 style="color: #00AEEF;">{{ shop.shop_name }}</h3>
+        <p style="font-size: 12px; color: #bdc3c7;">Role: {{ session['role'] }}</p>
+        <hr style="border: 0.5px solid #34495e;">
+        
         <a href="/dashboard" style="color:white; text-decoration: none;"><p>🏠 POS Dashboard</p></a>
-        <a href="/inventory" style="color:white; text-decoration: none;"><p>📦 Inventory</p></a>
-        <p><strong>📊 Sales History</strong></p>
+        <p style="color: #00AEEF;"><strong>📊 Sales History</strong></p>
+
+        {% if session['role'] == 'Admin' %}
+            <a href="/cash" style="color:white; text-decoration: none;"><p>💰 Cash Management</p></a>
+            <a href="/sales?filter=today" style="color: #ffffff; text-decoration: none;"><p>📅 Daily Sales</p></a>
+            <a href="/reports" style="color:white; text-decoration: none;"><p>📊 Financial Reports</p></a>
+            <a href="/inventory" style="color:white; text-decoration: none;">📦 Inventory</a>
+            <a href="/register" style="color:white; text-decoration: none;"><p>👤 Register Staff</p></a>
+            <a href="/settings" style="color:white; text-decoration: none;"><p>⚙️ Shop Settings</p></a>
+        {% endif %}
+
+        <hr style="border: 0.5px solid #34495e;">
+        <a href="/change_password" style="color:white; text-decoration: none;"><p>🔒 Change Password</p></a>
+        <a href="/logout" style="color:#ff7675; text-decoration: none;">Logout</a>
     </div>
 
     <div class="main">
