@@ -73,6 +73,7 @@ Built using **Python (Flask) and SQLite**, the system provides a secure, scalabl
 ---
 
 ## 📁 Project Structure
+
 shop_manager/
 │
 ├── app.py # Main application file
