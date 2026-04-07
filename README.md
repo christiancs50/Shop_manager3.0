@@ -73,7 +73,7 @@ Built using **Python (Flask) and SQLite**, the system provides a secure, scalabl
 ---
 
 ## 📁 Project Structure
-
+---
 shop_manager/
 │
 ├── app.py # Main application file
@@ -87,7 +87,7 @@ shop_manager/
 ├── .env # Environment variables
 ├── requirements.txt # Dependencies
 └── README.md
-
+---
 
 ---
 
@@ -100,29 +100,26 @@ cd shop_manager
 
 ### 2. Create Virtual Environment
 python -m venv venv
-
+---
 Activate: venv\Scripts\activate # Windows
 
 ---
 
 ### 3. Install Dependencies
+---
 pip install -r requirements.txt
 
 ---
 
 ### 4. Configure Environment Variables
+---
 Create a `.env` file: ASK ME"MESSAGE ME"
 
 ---
 
 ### 5. Run the Application
 
----
-
 ### 6. Open in Browser
-
-
----
 
 ## 🔑 Default Login
 
@@ -175,8 +172,6 @@ without the complexity of enterprise-level systems.
 ## 👨‍💻 Author
 
 **Chriddle**  
-
----
 
 ## 📄 License
 
