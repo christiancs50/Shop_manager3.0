@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>POS Terminal - {{ shop.shop_name }}</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+        <title>POS Terminal - {{ shop.shop_name }}</title>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background: #f0f2f5; color: #333; padding-bottom: 60px; }
         
@@ -103,7 +104,7 @@
         <div>
             <h2 style="margin: 0; font-size: 20px; color: #2c3e50;">{{ shop.shop_name }}</h2>
             <span style="font-size: 11px; color: #7f8c8d; text-transform: uppercase; letter-spacing: 1px;">
-            Terminal ACC-01 | Location: Accra | User: {{ user }}
+            Terminal ACC-01 | Location: {{ shop.address }} | User: {{ user }}
             </span>
         </div>
     </div>
@@ -127,8 +128,11 @@
                 <a href="/inventory">📦 Stock Management</a>
                 {% if role == 'Admin' %}
                     <a href="/reports">📊 Financial Reports</a>
+                    <a href="/register" >👤 Register Staff</a>
                     <a href="/settings">⚙️ Settings</a>
+                    
                 {% endif %}
+                <a href="{{ url_for('user_change_password') }}"><i class="fas fa-key"></i> Change Password</a>
                 <a href="/logout" style="color: #e74c3c; font-weight: bold;">🚪 Logout</a>
             </div>
         </div>
@@ -204,7 +208,7 @@
         <div style="text-align: center; border-bottom: 1px dashed #000; padding-bottom: 10px; margin-bottom: 10px;">
             <h2 style="margin:0;">{{ shop.shop_name }}</h2>
             <span style="font-size: 11px; color: #7f8c8d; text-transform: uppercase; letter-spacing: 1px;">
-            Terminal ACC-01 | Location: Accra | User: {{ user }}
+            Terminal ACC-01 | Location: {{ shop.address }} | User: {{ user }}
     </span>
 
         </div>
@@ -361,7 +365,9 @@
 
         fetch('/settle_payment', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json',
+                'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').getAttribute('content')
+             },
             body: JSON.stringify({
                 cart: cart.map(i => ({ id: i.id, qty: i.qty })),
                 vat_percent: currentVatPercent,

@@ -70,12 +70,11 @@
         <p style="color: #00AEEF;"><strong>📊 Financial Reports</strong></p>
 
         {% if session['role'] == 'Admin' %}
-            <a href="/cash" style="color:white; text-decoration: none;"><p>💰 Cash Management</p></a>
+            <a href="/cash" style="color:white; text-decoration: none;"><p>💰 Cashout Manager</p></a>
             <a href="/sales?filter=today" style="color: #ffffff; text-decoration: none;"><p>📅 Daily Sales</p></a>
             <a href="/inventory" style="color:white; text-decoration: none;">📦 Inventory</a>
             <a href="/register" style="color:white; text-decoration: none;"><p>👤 Register Staff</p></a>
             <a href="/sales" style="color:white; text-decoration: none;"><p>📊 Sales History</p></a>
-            <a href="/settings" style="color:white; text-decoration: none;"><p>⚙️ Shop Settings</p></a>
         {% endif %}
 
         <hr style="border: 0.5px solid #34495e;">

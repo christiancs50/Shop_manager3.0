@@ -1,11 +1,16 @@
+import sys
 import io
+import webview
 import os
 import sqlite3
-from datetime import datetime, date
+import shutil # Added for automated backups
+from datetime import datetime, date, timezone
 from functools import wraps
 from dotenv import load_dotenv  # Ensure you ran 'pip install python-dotenv'
 
+
 #The PDF specific imports
+from threading import Thread
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
@@ -13,12 +18,21 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
 
 from flask import Flask, render_template, request, redirect, url_for, g, session, jsonify, flash, Response
+from flask_wtf.csrf import CSRFProtect
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+
+if getattr(sys, 'frozen', False):
+    template_folder = os.path.join(sys._MEIPASS, 'templates')
+    static_folder = os.path.join(sys._MEIPASS, 'static')
+    app = Flask(__name__, template_folder=template_folder, static_folder=static_folder)
+else:
+    app = Flask(__name__)
+
+csrf = CSRFProtect(app)
 
 # 1. Load environment variables FIRST
 load_dotenv()
-
-app = Flask(__name__)
 
 # 2. Use os.getenv to pull from .env. 
 # We REMOVE the hardcoded 'pos-system-secret-key' line.
@@ -30,6 +44,16 @@ UPLOAD_FOLDER = 'static/uploads'
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
+# 4. Apply the security settings
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE='Lax',
+    )
+
+def start_server():
+    app.run(host='127.0.0.1', port=5000, threaded=True)
+
+
 # --- 1. DATABASE MANAGEMENT ---
 def get_db():
     if 'db' not in g:
@@ -37,6 +61,25 @@ def get_db():
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
+
+
+# Add the backup function here so it's ready to use
+def run_auto_backup():
+    backup_dir = os.path.join(app.root_path, 'backups')
+    if not os.path.exists(backup_dir):
+        os.makedirs(backup_dir)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+    dest = os.path.join(backup_dir, f"backup_{timestamp}.db")
+    
+    try:
+        shutil.copy2(DATABASE, dest)
+        # Keep only the 5 most recent backups
+        files = sorted([os.path.join(backup_dir, f) for f in os.listdir(backup_dir)], key=os.path.getmtime)
+        while len(files) > 5:
+            os.remove(files.pop(0))
+    except Exception as e:
+        print(f"Backup failed: {e}")
 
 def get_shop_settings():
     db = get_db()
@@ -48,6 +91,22 @@ def close_connection(exception):
     db = g.pop('db', None)
     if db is not None:
         db.close()
+
+def validate_numeric(value, min_val=0, field_name="Field"):
+    try:
+        num = float(value)
+        if num < min_val:
+            return None, f"{field_name} cannot be less than {min_val}."
+        return num, None
+    except (ValueError, TypeError):
+        return None, f"Invalid input for {field_name}. Please enter a number."
+
+@app.context_processor
+def inject_shop_settings():
+    db = get_db()
+    # Ensure this line and the one above are perfectly aligned vertically
+    shop = db.execute("SELECT * FROM shop_settings LIMIT 1").fetchone()
+    return dict(shop=shop)
 
 def init_db():
     with app.app_context():
@@ -90,7 +149,8 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            role TEXT NOT NULL)''')
+            role TEXT NOT NULL,
+            requires_password_change INTEGER DEFAULT 1)''')
 
         db.execute('''CREATE TABLE IF NOT EXISTS shop_settings (
             id INTEGER PRIMARY KEY,
@@ -146,6 +206,122 @@ def admin_required(f):
 def index():
     return redirect(url_for('login'))
 
+def generate_reset_token(email):
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    return serializer.dumps(email, salt='password-reset-salt')
+
+def confirm_reset_token(token, expiration=1800):
+    serializer = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    try:
+        email = serializer.loads(token, salt='password-reset-salt', max_age=expiration)
+        return email
+    except:
+        return False
+
+@app.route("/reset_staff_password/<int:user_id>", methods=["POST"])
+@login_required
+def reset_staff_password(user_id):
+    if session.get('role') != 'Admin':
+        flash("Unauthorized!")
+        return redirect(url_for('dashboard'))
+
+    new_password = request.form.get("new_password")
+    hashed_pw = generate_password_hash(new_password)
+    
+    db = get_db()
+    db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hashed_pw, user_id))
+    db.commit()
+    
+    flash("Password updated successfully.")
+    return redirect(url_for('register'))
+
+@app.route("/forgot_password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        email = request.form.get("email")
+        # 1. Check if email exists in DB
+        # 2. Generate token: token = generate_reset_token(email)
+        # 3. Send email with url_for('reset_with_token', token=token, _external=True)
+        flash("If that email exists, a reset link has been sent.")
+    return render_template("forgot_password.html")
+
+@app.route("/change_password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    if request.method == "POST":
+        old_pw = request.form.get("old_password")
+        new_pw = request.form.get("new_password")
+        confirm_pw = request.form.get("confirm_password")
+
+        # Basic Validation
+        if new_pw != confirm_pw:
+            flash("New passwords do not match!")
+            return render_template("change_password.html")
+
+        db = get_db()
+        user = db.execute("SELECT password_hash FROM users WHERE id = ?", 
+                         (session['user_id'],)).fetchone()
+
+        if user and check_password_hash(user['password_hash'], old_pw):
+            new_hashed_pw = generate_password_hash(new_pw)
+            
+            # Update DB
+            db.execute("UPDATE users SET password_hash = ?, requires_password_change = 0 WHERE id = ?", 
+                       (new_hashed_pw, session['user_id']))
+            db.commit()
+
+            # Update Session to "Unlock" the dashboard
+            session['requires_password_change'] = 0
+            
+            flash("Password updated! Opening dashboard...")
+            return redirect(url_for('dashboard')) # Make sure 'dashboard' route exists!
+        else:
+            flash("Incorrect current password.")
+
+    # This MUST be here to show the page initially
+    return render_template("change_password.html")
+
+@app.route("/user/settings/password", methods=["GET", "POST"])
+@login_required
+def user_change_password():
+    if request.method == "POST":
+        old_pw = request.form.get("old_password")
+        new_pw = request.form.get("new_password")
+        confirm_pw = request.form.get("confirm_password")
+        
+        db = get_db()
+        # Fetch the current user's hashed password from the database
+        user = db.execute("SELECT password_hash FROM users WHERE id = ?", 
+                         (session['user_id'],)).fetchone()
+
+        # Check if the "Current Password" entered matches the database
+        if user and check_password_hash(user['password_hash'], old_pw):
+            new_hashed_pw = generate_password_hash(new_pw)
+            db.execute("UPDATE users SET password_hash = ? WHERE id = ?", 
+                       (new_hashed_pw, session['user_id']))
+            db.commit()
+            flash("Password updated successfully!")
+            return redirect(url_for('dashboard'))
+        else:
+            flash("Incorrect current password.")
+            
+    return render_template("user_change_password.html")
+
+@app.route("/reset/<token>", methods=["GET", "POST"])
+def reset_with_token(token):
+    email = confirm_reset_token(token)
+    if not email:
+        flash("The reset link is invalid or has expired.")
+        return redirect(url_for('login'))
+    
+    if request.method == "POST":
+        new_password = generate_password_hash(request.form.get("password"))
+        # Update DB: UPDATE users SET password_hash = ? WHERE email = ?
+        flash("Password updated!")
+        return redirect(url_for('login'))
+        
+    return render_template("reset_password_form.html")
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -153,12 +329,27 @@ def login():
         password = request.form.get("password")
         db = get_db()
         user = db.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+        
         if user and check_password_hash(user['password_hash'], password):
-            session.clear()
             session['user_id'] = user['id']
             session['user'] = user['username']
             session['role'] = user['role']
+            
+            # FIXED: Use brackets [] instead of .get()
+            try:
+                session['requires_password_change'] = user['requires_password_change']
+            except (sqlite3.OperationalError, KeyError):
+                session['requires_password_change'] = 0
+            
+            if session['requires_password_change'] == 1:
+                flash("Please change your password before continuing.")
+                return redirect(url_for('change_password'))
+
+            if user['role'].lower() == 'admin':
+                run_auto_backup()
+                
             return redirect(url_for("dashboard"))
+        
         flash("Invalid username or password!")
     return render_template("login.html")
 
@@ -167,12 +358,6 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-@app.context_processor
-def inject_shop():
-    db = get_db()
-    shop_data = db.execute("SELECT * FROM shop_settings WHERE id = 1").fetchone()
-    # This allows you to use {{ shop.currency }} in any HTML file
-    return dict(shop=shop_data)
 
 @app.route("/delete_user/<int:id>", methods=["POST", "GET"])
 @login_required
@@ -212,77 +397,97 @@ def settings():
         grace_period = request.form.get("grace_period")
         address = request.form.get("address")
         contact = request.form.get("contact")
+        remove_logo = request.form.get("remove_logo") # Added this line
 
-        # 2. Handle Logo Upload
+        upload_path = os.path.join('static', 'uploads')
         file = request.files.get('logo')
-        if file and file.filename != '':
-            filename = secure_filename(file.filename)
-            upload_path = os.path.join('static', 'uploads')
-            if not os.path.exists(upload_path):
-                os.makedirs(upload_path)
-            file.save(os.path.join(upload_path, filename))
+
+        # 2. Handle Logo Removal OR New Upload
+        if remove_logo == "1":
+            # Delete old file and reset to default
+            old_logo = db.execute("SELECT logo_path FROM shop_settings WHERE id = 1").fetchone()
+            if old_logo and old_logo['logo_path'] and old_logo['logo_path'] != 'default_logo.png':
+                old_path = os.path.join(upload_path, old_logo['logo_path'])
+                if os.path.exists(old_path):
+                    os.remove(old_path)
             
-            db.execute('''
-                UPDATE shop_settings 
-                SET shop_name=?, tax_rate=?, currency=?, 
-                    delete_grace_period=?, address=?, contact_number=?, logo_path=?
-                WHERE id = 1
-            ''', (shop_name, tax_rate, currency, grace_period, address, contact, filename))
-        else:
-            db.execute('''
-                UPDATE shop_settings 
-                SET shop_name=?, tax_rate=?, currency=?, 
-                    delete_grace_period=?, address=?, contact_number=?
-                WHERE id = 1
-            ''', (shop_name, tax_rate, currency, grace_period, address, contact))
+            db.execute("UPDATE shop_settings SET logo_path = 'default_logo.png' WHERE id = 1")
+
+        elif file and file.filename != '':
+            # Handle new upload and delete old file
+            filename = secure_filename(file.filename)
+            
+            old_logo = db.execute("SELECT logo_path FROM shop_settings WHERE id = 1").fetchone()
+            if old_logo and old_logo['logo_path'] and old_logo['logo_path'] != 'default_logo.png':
+                old_path = os.path.join(upload_path, old_logo['logo_path'])
+                if os.path.exists(old_path):
+                    os.remove(old_path)
+
+            file.save(os.path.join(upload_path, filename))
+            db.execute("UPDATE shop_settings SET logo_path = ? WHERE id = 1", (filename,))
+
+        # 3. Update all other text settings
+        db.execute('''
+            UPDATE shop_settings 
+            SET shop_name=?, tax_rate=?, currency=?, 
+                delete_grace_period=?, address=?, contact_number=?
+            WHERE id = 1
+        ''', (shop_name, tax_rate, currency, grace_period, address, contact))
             
         db.commit()
         flash("Settings updated successfully!")
         return redirect(url_for('settings'))
 
-    # GET request: shop data is now handled by the context_processor above
     return render_template("settings.html")
 
 @app.route("/update_settings", methods=["POST"])
 def update_settings():
     db = get_db()
     
-    # Get values from your HTML form
+    # 1. Get text values from your HTML form
     shop_name = request.form.get("shop_name")
     currency = request.form.get("currency")
     tax_rate = request.form.get("tax_rate")
     address = request.form.get("address")
     contact = request.form.get("contact")
     grace = request.form.get("grace_period")
-
-    # Update the database (assuming your table is named 'shop')
+    
+    # 2. Update the main settings in the database first
     db.execute("""
         UPDATE shop_settings
         SET shop_name = ?, currency = ?, tax_rate = ?, 
             address = ?, contact_number = ?, delete_grace_period = ?
         WHERE id = 1
     """, (shop_name, currency, tax_rate, address, contact, grace))
+
+    # 3. Handle the "Remove Logo" checkbox
+    remove_logo = request.form.get("remove_logo")
+    if remove_logo == "1":
+        db.execute("UPDATE shop_settings SET logo_path = 'default_logo.png' WHERE id = 1")
+    
+    # 4. Handle a NEW logo upload
+    file = request.files.get('logo')
+    if file and file.filename != '':
+        filename = secure_filename(file.filename)
+        # Ensure the filename is unique to avoid browser cache issues (optional)
+        # filename = f"{int(datetime.now().timestamp())}_{filename}"
+        
+        upload_path = os.path.join('static', 'uploads')
+        file.save(os.path.join(upload_path, filename))
+        
+        # Update the database with the new path
+        db.execute("UPDATE shop_settings SET logo_path = ? WHERE id = 1", (filename,))
     
     db.commit()
-    
-    # Flash a message to the user
-    import flask
-    flask.flash("Settings updated successfully!")
-    
-    # Redirect back to the settings page
-    return flask.redirect("/settings")
+    flash("Settings updated successfully!")
+    return redirect(url_for('settings'))
 
 # --- 4. POS & INVENTORY ---
 @app.route("/dashboard")
 @login_required
 def dashboard():
     db = get_db()
-    
-    # --- 1. FIX: Fetch the shop information so 'shop_info' exists! ---
-    # We fetch the first row from your settings/shop table
-    shop_info = db.execute("SELECT * FROM shop_settings LIMIT 1").fetchone()
-    
-    # --- 2. Your existing product logic ---
+        # --- 2. Your existing product logic ---
     products = db.execute("SELECT * FROM products WHERE quantity > 0").fetchall()
     
     # --- 3. Return everything together ---
@@ -290,9 +495,16 @@ def dashboard():
         "dashboard.html", 
         user=session.get('user', 'Staff'), 
         role=session.get('role', 'User'), 
-        shop=dict(shop_info) if shop_info else {}, # Now shop_info is defined!
         products=[dict(p) for p in products]
     )
+def validate_numeric(value, min_val=0, field_name="Field"):
+    try:
+        num = float(value)
+        if num < min_val:
+            return None, f"{field_name} cannot be less than {min_val}."
+        return num, None
+    except (ValueError, TypeError):
+        return None, f"Invalid input for {field_name}. Please enter a number."
 
 @app.route("/settle_payment", methods=["POST"])
 @login_required
@@ -300,54 +512,75 @@ def settle_payment():
     data = request.json
     db = get_db()
     
-    # The Bridge ID: Unique for this specific customer's pile of items
     import time
     transaction_group_id = int(time.time()) 
-
-    settings = get_shop_settings()
-    tax_rate = settings['tax_rate'] if settings else 0.0
 
     try:
         subtotal = 0
         cart_items = []
 
-        # Process each item
+        # --- STAGE 1: VALIDATION ---
+        # We check everything BEFORE updating any database rows
         for item in data['cart']:
-            prod = db.execute("SELECT name, sell_price, quantity FROM products WHERE id=?", (item['id'],)).fetchone()
+            # 1. Validate that quantity is a positive number
+            qty_sold, error = validate_numeric(item.get('qty'), min_val=1, field_name=f"Quantity for {item.get('name', 'Product')}")
+            if error:
+                return jsonify({"status": "error", "message": error}), 400
+
+            # 2. Fetch product details and check physical stock levels
+            prod = db.execute("SELECT name, sell_price, quantity FROM products WHERE id=?", 
+                             (item['id'],)).fetchone()
             
-            # Update Stock
-            db.execute("UPDATE products SET quantity = quantity - ? WHERE id=?", (item['qty'], item['id']))
-            
-            line_total = prod['sell_price'] * item['qty']
+            if not prod:
+                return jsonify({"status": "error", "message": f"Product ID {item['id']} not found"}), 404
+
+            if prod['quantity'] < qty_sold:
+                return jsonify({
+                    "status": "error", 
+                    "message": f"Insufficient stock for {prod['name']}. Available: {prod['quantity']}"
+                }), 400
+
+            # If item is valid, add it to our temporary processing list
+            line_total = prod['sell_price'] * qty_sold
             subtotal += line_total
-            cart_items.append((item['id'], item['qty'], line_total))
+            cart_items.append({
+                "id": item['id'],
+                "qty": qty_sold,
+                "total": line_total
+            })
 
-        # Calculate Totals
-        vat_val = subtotal * (data.get('vat_percent', 0) / 100)
-        discount_val = data.get('discount', 0)
-        final_total = subtotal + vat_val - discount_val
+        # --- STAGE 2: DATABASE UPDATES ---
+        # If we reached here, the entire cart is valid. Now we save.
+        vat_percent = float(data.get('vat_percent', 0))
+        discount_val = float(data.get('discount', 0))
+        
+        vat_amount = subtotal * (vat_percent / 100)
+        final_total = (subtotal + vat_amount) - discount_val
 
-        # Save to database
-        for i, row in enumerate(cart_items):
-            # We save the 'grand_total' only on the first row to prevent 
-            # reports from double-counting the total sale.
-            g_total = final_total if i == 0 else 0 
+        for index, row in enumerate(cart_items):
+            # Deduct inventory
+            db.execute("UPDATE products SET quantity = quantity - ? WHERE id = ?", 
+                       (row['qty'], row['id']))
             
+            # Record sale (Grand total is only saved on the first row of the transaction)
+            grand_total_to_save = final_total if index == 0 else 0
             db.execute('''INSERT INTO sales 
                 (product_id, quantity, total_price, transaction_id, user_id, grand_total, timestamp) 
                 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)''',
-                (row[0], row[1], row[2], transaction_group_id, session.get('user_id'), g_total))
+                (row['id'], row['qty'], row['total'], transaction_group_id, session.get('user_id'), grand_total_to_save))
 
         db.commit()
 
-        # Send the Bridge ID back to the Frontend
         return jsonify({
             "status": "success", 
-            "trans_id": transaction_group_id
+            "trans_id": transaction_group_id,
+            "message": "Payment settled and inventory updated"
         })
+
     except Exception as e:
         db.rollback()
-        return jsonify({"status": "error", "message": str(e)}), 400
+        print(f"Checkout Error: {e}")
+        return jsonify({"status": "error", "message": "Internal Server Error"}), 500
 
 @app.route("/print_receipt/<int:trans_id>")
 @login_required
@@ -437,7 +670,8 @@ def delete_product(product_id):
             return redirect(url_for('inventory'))
 
         # 4. Calculate Age (Using UTC to match your init_db 'now')
-        age_in_days = (datetime.utcnow() - added_date).days
+        from datetime import timezone
+        age_in_days = (datetime.now(timezone.utc) - added_date).days
 
         # 5. The "Business Logic" Check
         if age_in_days >= DAYS_LIMIT:
@@ -611,15 +845,61 @@ def reports():
 @admin_required
 def cash():
     db = get_db()
-    if request.method == "POST":
-        db.execute("INSERT INTO cash_log (amount, type, description) VALUES (?, 'OUT', ?)", 
-                   (request.form.get("amount"), request.form.get("description")))
-        db.commit()
     
-    logs = db.execute("SELECT * FROM cash_log ORDER BY timestamp DESC").fetchall()
-    total_in = db.execute("SELECT SUM(grand_total) FROM sales").fetchone()[0] or 0
-    total_out = db.execute("SELECT SUM(amount) FROM cash_log WHERE type = 'OUT'").fetchone()[0] or 0
-    return render_template("cash.html", logs=logs, total_in=total_in, total_out=total_out, balance=total_in-total_out)
+    # 1. Handle New Expense (POST)
+    if request.method == "POST":
+        description = request.form.get("description")
+        try:
+            amount = float(request.form.get("amount"))
+            # Ensure your table has the timestamp column or uses DEFAULT CURRENT_TIMESTAMP
+            db.execute("INSERT INTO cash_log (amount, type, description) VALUES (?, 'OUT', ?)", 
+                       (amount, description))
+            db.commit()
+            flash("Expense logged successfully")
+        except ValueError:
+            flash("Invalid amount entered")
+        return redirect(url_for('cash'))
+
+    # 2. Get the filter from the URL (defaults to 'all')
+    time_filter = request.args.get('filter', 'all')
+    
+    # Base conditions for SQLite
+    date_condition = ""
+    if time_filter == 'today':
+        date_condition = " WHERE date(timestamp) = date('now', 'localtime')"
+    elif time_filter == 'weekly':
+        date_condition = " WHERE date(timestamp) >= date('now', 'localtime', '-7 days')"
+    elif time_filter == 'monthly':
+        date_condition = " WHERE date(timestamp) >= date('now', 'localtime', 'start of month')"
+    elif time_filter == 'yearly':
+        date_condition = " WHERE date(timestamp) >= date('now', 'localtime', 'start of year')"
+
+    # 3. Fetch Filtered Logs
+    logs = db.execute(f"SELECT * FROM cash_log {date_condition} ORDER BY timestamp DESC").fetchall()
+
+    # 4. Calculate Filtered Totals
+    # Total In comes from Sales
+    sales_query = "SELECT SUM(grand_total) FROM sales"
+    if date_condition:
+        sales_query += date_condition.replace('timestamp', 'timestamp') # adjust if sales uses a different col name
+    
+    total_in = db.execute(sales_query).fetchone()[0] or 0
+    
+    # Total Out comes from Cash Log
+    expense_query = "SELECT SUM(amount) FROM cash_log WHERE type = 'OUT'"
+    if date_condition:
+        # Append the date filter to the existing WHERE clause
+        expense_query += date_condition.replace('WHERE', 'AND')
+        
+    total_out = db.execute(expense_query).fetchone()[0] or 0
+
+    return render_template("cash.html", 
+                           logs=logs, 
+                           total_in=total_in, 
+                           total_out=total_out, 
+                           balance=total_in - total_out,
+                           current_filter=time_filter)
+
 
 @app.route('/reports/daily_items')
 @admin_required
@@ -733,7 +1013,27 @@ def get_last_transaction_id():
     
     return jsonify({"id": None})
 
+def run_flask():
+    # Use threaded=True to handle multiple requests in the desktop window
+    app.run(host='127.0.0.1', port=5000, debug=False, threaded=True)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
+    # 1. Ensure tables are created (This fixes the 'no such table' error)
     init_db()
-    app.run(debug=True)
+
+    # 2. Update Database Schema for the password change flag
+    with sqlite3.connect(DATABASE) as db:
+        try:
+            db.execute("ALTER TABLE users ADD COLUMN requires_password_change INTEGER DEFAULT 1")
+            db.commit()
+        except sqlite3.OperationalError:
+            pass # Column already exists
+
+    # 3. Start Flask in a separate thread
+    t = Thread(target=start_server)
+    t.daemon = True
+    t.start()
+
+    # 4. Launch the Window
+    webview.create_window('Shop Management System', 'http://127.0.0.1:5000')
+    webview.start()

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Cash Manager</title>
+    <title>Cash Manager - {{ shop.shop_name }}</title>
     <style>
         body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; height: 100vh; background: #f0f2f5; }
         .sidebar { width: 250px; background: #2c3e50; color: white; padding: 20px; }
@@ -17,29 +17,22 @@
             text-align: center; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
         }
-        .stat-card h3 { margin: 0; font-size: 1.2em; }
-        
-        /* Alerts */
-        .alert-box { 
-            background: #fff3cd; 
-            color: #856404; 
-            padding: 15px; 
-            border-radius: 8px; 
-            margin-bottom: 20px; 
-            border: 1px solid #ffeeba; 
-        }
+        .stat-card h3 { margin: 5px 0 0; font-size: 1.4em; }
+        .stat-card p { margin: 0; opacity: 0.9; font-size: 0.9em; text-transform: uppercase; }
 
         /* Table & Forms */
-        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
         th, td { padding: 12px; border-bottom: 1px solid #eee; text-align: left; }
         th { background: #34495e; color: white; font-size: 13px; text-transform: uppercase; }
         
         .btn { padding: 8px 15px; border: none; border-radius: 4px; color: white; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; font-size: 13px; font-weight: bold; }
-        input { padding: 10px; margin-right: 10px; border: 1px solid #ddd; border-radius: 4px; width: 200px; }
+        input, select { padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
         
-        form { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        button[type="submit"] { background: #3498db; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+        form.expense-form { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; align-items: center; gap: 10px; }
+        button[type="submit"] { background: #3498db; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-weight: bold; }
         button[type="submit"]:hover { background: #2980b9; }
+
+        .filter-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
     </style>
 </head>
 <body>
@@ -49,57 +42,63 @@
         <hr style="border: 0.5px solid #34495e;">
         
         <a href="/dashboard" style="color:white; text-decoration: none;"><p>🏠 POS Dashboard</p></a>
-        <p style="color: #00AEEF;"><strong>📅 Cash Management</strong></p>
+        <p style="color: #00AEEF;"><strong>💰 Cashout Management</strong></p>
+        <a href="/sales?filter=today" style="color: #ffffff; text-decoration: none;"><p>📅 Daily Sales</p></a>
+        <a href="/inventory" style="color:white; text-decoration: none;"><p>📦 Inventory</p></a>
+        <a href="/reports" style="color:white; text-decoration: none;"><p>📊 Financial Reports</p></a>
+        <a href="/register" style="color:white; text-decoration: none;"><p>👤 Register Staff</p></a>
 
-            <a href="/sales?filter=today" style="color: #ffffff; text-decoration: none;"><p>📅 Daily Sales</p></a>
-            <a href="/reports" style="color:white; text-decoration: none;"><p>📊 Financial Reports</p></a>
-            <a href="/inventory" style="color:white; text-decoration: none;">📦 Inventory</a>
-            <a href="/register" style="color:white; text-decoration: none;"><p>👤 Register Staff</p></a>
-            <a href="/sales" style="color:white; text-decoration: none;"><p>📊 Sales History</p></a>
-            <a href="/settings" style="color:white; text-decoration: none;"><p>⚙️ Shop Settings</p></a>
-
-
+        <a href="/sales" style="color:white; text-decoration: none;"><p>📊 Sales History</p></a>       
         <hr style="border: 0.5px solid #34495e;">
-        <a href="/change_password" style="color:white; text-decoration: none;"><p>🔒 Change Password</p></a>
         <a href="/logout" style="color:#ff7675; text-decoration: none;">Logout</a>
-
     </div>
 
     <div class="main">
-        {% if products %}
-        <div class="alert-box">
-            <strong>⚠️ Low Stock Alert:</strong>
-            {% for p in products %} {{ p.name }} ({{ p.quantity }} left){% if not loop.last %}, {% endif %}{% endfor %}
-        </div>
-        {% endif %}
-
         <div class="stats">
             <div class="stat-card" style="background:#27ae60;">
-                <p style="margin:0; opacity:0.8;">Total In</p>
-                <h3>GHS {{ "{:.2f}".format(total_in) }}</h3>
+                <p>Total Sales (In)</p>
+                <h3>{{ shop.currency }} {{ "{:.2f}".format(total_in) }}</h3>
             </div>
             <div class="stat-card" style="background:#e74c3c;">
-                <p style="margin:0; opacity:0.8;">Total Out</p>
-                <h3>GHS {{ "{:.2f}".format(total_out) }}</h3>
+                <p>Total Expenses (Out)</p>
+                <h3>{{ shop.currency }} {{ "{:.2f}".format(total_out) }}</h3>
             </div>
             <div class="stat-card" style="background:#2980b9;">
-                <p style="margin:0; opacity:0.8;">Net Balance</p>
-                <h3>GHS {{ "{:.2f}".format(balance) }}</h3>
+                <p>Net Cash Position</p>
+                <h3>{{ shop.currency }} {{ "{:.2f}".format(balance) }}</h3>
             </div>
         </div>
 
-        <form method="POST">
-            <h3 style="margin-top: 0; font-size: 16px; color: #7f8c8d;">Log New Expense</h3>
-            <input type="text" name="description" placeholder="e.g., Electricity bill, Transport" required>
-            <input type="number" step="0.01" name="amount" placeholder="Amount (GHS)" required>
-            <button type="submit">Log Expense</button>
+        <form method="POST" class="expense-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div style="flex: 1;">
+                <h3 style="margin: 0 0 5px 0; font-size: 14px; color: #7f8c8d;">Log New Expense</h3>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" name="description" placeholder="Description (e.g. Electricity)" style="flex: 2;" required>
+                    <input type="number" step="0.01" name="amount" placeholder="Amount" style="flex: 1;" required>
+                    <button type="submit">Log Expense</button>
+                </div>
+            </div>
         </form>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <div class="filter-container">
             <h2 style="margin: 0; font-size: 18px;">Transaction History</h2>
-            <a href="/download_cash_log" class="btn" style="background: #34495e;">
-                📥 Download CSV (Excel)
-            </a>
+            
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <form action="/cash" method="GET" style="margin: 0;">
+                    <select name="filter" onchange="this.form.submit()">
+                        <option value="all" {% if current_filter == 'all' %}selected{% endif %}>All Records</option>
+                        <option value="today" {% if current_filter == 'today' %}selected{% endif %}>Today</option>
+                        <option value="weekly" {% if current_filter == 'weekly' %}selected{% endif %}>This Week</option>
+                        <option value="monthly" {% if current_filter == 'monthly' %}selected{% endif %}>This Month</option>
+                        <option value="yearly" {% if current_filter == 'yearly' %}selected{% endif %}>This Year</option>
+                    </select>
+                </form>
+
+                <a href="/download_cash_log" class="btn" style="background: #34495e;">
+                    📥 Export CSV
+                </a>
+            </div>
         </div>
 
         <table>
@@ -107,7 +106,8 @@
                 <tr>
                     <th>Date & Time</th>
                     <th>Description</th>
-                    <th>Amount</th>
+                    <th>Type</th>
+                    <th style="text-align: right;">Amount ({{ shop.currency }})</th>
                 </tr>
             </thead>
             <tbody>
@@ -115,11 +115,21 @@
                 <tr>
                     <td style="color: #7f8c8d; font-size: 0.9em;">{{ log.timestamp }}</td>
                     <td><strong>{{ log.description }}</strong></td>
-                    <td style="color: {{ '#e74c3c' if log.type == 'OUT' else '#27ae60' }}; font-weight: bold;">
-                        {{ '-' if log.type == 'OUT' else '+' }}GHS {{ "{:.2f}".format(log.amount) }}
+                    <td>
+                        <span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: {{ '#fadbd8' if log.type == 'OUT' else '#d4edda' }}; color: {{ '#c0392b' if log.type == 'OUT' else '#1e8449' }};">
+                            {{ log.type }}
+                        </span>
+                    </td>
+                    <td style="text-align: right; font-weight: bold; color: {{ '#e74c3c' if log.type == 'OUT' else '#27ae60' }};">
+                        {{ '-' if log.type == 'OUT' else '+' }}{{ shop.currency }} {{ "{:.2f}".format(log.amount) }}
                     </td>
                 </tr>
                 {% endfor %}
+                {% if not logs %}
+                <tr>
+                    <td colspan="4" style="text-align: center; padding: 30px; color: #bdc3c7;">No transactions found for this period.</td>
+                </tr>
+                {% endif %}
             </tbody>
         </table>
     </div>

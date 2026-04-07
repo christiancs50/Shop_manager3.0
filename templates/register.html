@@ -48,12 +48,11 @@
         <p style="color: #00AEEF;"><strong>📦 Register Staff</strong></p>
 
 
-            <a href="/cash" style="color:white; text-decoration: none;"><p>💰 Cash Management</p></a>
+            <a href="/cash" style="color:white; text-decoration: none;"><p>💰 Cashout Manager</p></a>
             <a href="/sales?filter=today" style="color: #ffffff; text-decoration: none;"><p>📅 Daily Sales</p></a>
             <a href="/reports" style="color:white; text-decoration: none;"><p>📊 Financial Reports</p></a>
             <a href="/inventory" style="color:white; text-decoration: none;">📦 Inventory</a>
             <a href="/sales" style="color:white; text-decoration: none;"><p>📊 Sales History</p></a>
-            <a href="/settings" style="color:white; text-decoration: none;"><p>⚙️ Shop Settings</p></a>
 
 
         <hr style="border: 0.5px solid #34495e;">
@@ -77,6 +76,8 @@
                 {% endwith %}
 
                 <form action="/register" method="POST">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
                     <label style="font-size: 13px; font-weight: bold; color: #34495e;">Username</label>
                     <input type="text" name="username" placeholder="e.g. Kwesi_Mensah" required>
                     
@@ -114,9 +115,22 @@
                             </td>
                             <td style="text-align: right;">
                                 {% if person.username != session['user'] %}
-                                <form action="/delete_user/{{ person.id }}" method="POST" style="display:inline;" onsubmit="return confirm('Permanently remove this user?')">
-                                    <button type="submit" class="delete-btn">Remove Account</button>
-                                </form>
+                                <div style="display: flex; justify-content: flex-end; align-items: center; gap: 10px;">
+
+                                      <form action="/reset_staff_password/{{ person.id }}" method="POST" style="display:inline-flex; align-items:center; gap:5px; margin-right:15px;">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        {# <input type="password" name="new_password" placeholder="New PW" required
+                                                style="width:90px; padding:4px; margin:0; font-size:12px;">
+                                        <button type="submit" style="background:#f39c12; width:auto; padding:4px 8px; margin:0; font-size:12px;">Reset</button> #}
+                                    </form>
+
+                                    <span style="color: #eee;">|</span>
+
+                                    <form action="/delete_user/{{ person.id }}" method="POST" style="display:inline;" onsubmit="return confirm('Permanently remove this user?')">
+                                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                        <button type="submit" class="delete-btn" style="white-space: nowrap; padding: 0; margin: 0;">Remove Account</button>
+                                    </form>
+                                </div>
                                 {% else %}
                                 <span style="font-size: 11px; color: #bdc3c7; font-style: italic;">(Logged In)</span>
                                 {% endif %}

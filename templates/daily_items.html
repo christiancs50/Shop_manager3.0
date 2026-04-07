@@ -1,17 +1,42 @@
 <style>
-    /* Professional Layout */
-    .report-container { 
-        padding: 30px; 
+    /* 1. Layout & Sidebar Positioning */
+    body { 
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+        margin: 0; 
+        display: flex; 
+        height: 100vh; 
+        background: #f0f2f5; 
+    }
+    .sidebar { 
+        width: 250px; 
+        background: #2c3e50; 
+        color: white; 
+        padding: 20px; 
+        flex-shrink: 0; 
+    }
+    .sidebar a { text-decoration: none; transition: 0.2s; }
+    .sidebar a:hover { opacity: 0.8; }
+
+    /* 2. Main Content Area */
+    .main-content {
+        flex: 1;
+        overflow-y: auto;
+        padding: 30px;
+    }
+    .report-container { 
         max-width: 1000px; 
         margin: auto;
+        background: white;
+        padding: 25px;
+        border-radius: 8px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
+
+    /* 3. Report Table Styling */
     .report-table { 
         width: 100%; 
         border-collapse: collapse; 
         margin-top: 20px; 
-        background: white;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     }
     .report-table th, .report-table td { 
         border: 1px solid #dee2e6; 
@@ -24,7 +49,7 @@
         font-weight: 600;
     }
 
-    /* Status Colors */
+    /* 4. Status Indicators */
     .stock-critical { background-color: #fff5f5; color: #c62828; }
     .badge-reorder { 
         background: #e74c3c; 
@@ -34,9 +59,8 @@
         font-size: 11px; 
         font-weight: bold;
     }
-    .badge-ok { color: #27ae60; font-weight: bold; }
+    .badge-ok { color: #27ae60; font-weight: bold; font-size: 12px; }
 
-    /* Print Button */
     .btn-print {
         background-color: #3498db;
         color: white;
@@ -49,68 +73,66 @@
     }
 
     @media print {
-        .btn-print, .action-sidebar { display: none !important; }
+        .sidebar, .btn-print { display: none !important; }
+        .main-content { padding: 0; }
+        .report-container { box-shadow: none; border: none; width: 100%; max-width: none; }
         .report-table { border: 1px solid #000; }
     }
 </style>
 
-
-    <div class="sidebar">
-        <h3 style="color: #00AEEF;">{{ shop.shop_name }}</h3>
-        <p style="font-size: 12px; color: #bdc3c7;">Role: {{ session['role'] }}</p>
-        <hr style="border: 0.5px solid #34495e;">
-        
-        <a href="/dashboard" style="color:white; text-decoration: none;"><p>🏠 POS Dashboard</p></a>
-        <p style="color: #00AEEF;"><strong>📊 Sales History</strong></p>
-
-        {% if session['role'] == 'Admin' %}
-            <a href="/cash" style="color:white; text-decoration: none;"><p>💰 Cash Management</p></a>
-            <a href="/sales?filter=today" style="color: #ffffff; text-decoration: none;"><p>📅 Daily Sales</p></a>
-            <a href="/reports" style="color:white; text-decoration: none;"><p>📊 Financial Reports</p></a>
-            <a href="/register" style="color:white; text-decoration: none;"><p>👤 Register Staff</p></a>
-            <a href="/settings" style="color:white; text-decoration: none;"><p>⚙️ Shop Settings</p></a>
-        {% endif %}
-
-        <hr style="border: 0.5px solid #34495e;">
-        <a href="/change_password" style="color:white; text-decoration: none;"><p>🔒 Change Password</p></a>
-        <a href="/logout" style="color:#ff7675; text-decoration: none;">Logout</a>
-    </div>
-
-<div class="report-container">
-    <button onclick="window.print()" class="btn-print">🖨️ Print / Save PDF</button>
-    <h2>Daily Movement & Stock Alerts</h2>
-    <p><strong>Date:</strong> {{ date }}</p>
+<div class="sidebar">
+    <h3 style="color: #00AEEF;">{{ shop.shop_name }}</h3>
+    <p style="font-size: 11px; color: #bdc3c7; text-transform: uppercase;">Role: {{ session['role'] }}</p>
+    <hr style="border: 0.5px solid #34495e; margin: 15px 0;">
     
-    <table class="report-table">
-        <thead>
-            <tr>
-                <th>Product Name</th>
-                <th>Sold Today</th>
-                <th>Current Stock</th>
-                <th>Status</th>
-                <th>Revenue (GHS)</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for item in items %}
-            <tr class="{{ 'stock-critical' if item.quantity <= item.min_stock_level else '' }}">
-                <td><strong>{{ item.name }}</strong></td>
-                <td>{{ item.total_sold or 0 }}</td>
-                <td>{{ item.quantity }}</td>
-                <td>
-                    <a href="/print_receipt/{{ item.transaction_id }}" target="_blank" 
-                       style="color: #3498db; text-decoration: none; font-weight: bold;">
-                       📄 View Receipt  
-                    </a>
-                    {% if item.quantity <= item.min_stock_level %}
-                        <span class="badge-reorder">REORDER NOW</span>
-                    {% else %}
-                        <span class="badge-ok">✓ OK</span>
-                    {% endif %}
-                </td>
-                <td>{{ "{:,.2f}".format(item.revenue or 0) }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <a href="/dashboard" style="color:white;"><p>🏠 POS Dashboard</p></a>
+    
+    {% if session['role'] == 'Admin' %}
+        <a href="/sales" style="color:white;"><p>📋 Sales History</p></a>
+        <a href="/cash" style="color:white;"><p>💰 Cash Manager</p></a>
+        <a href="/reports" style="color:white;"><p>📊 Financial Reports</p></a>
+        <a href="/inventory" style="color:white;"><p>📦 Inventory</p></a>
+    {% endif %}
+
+    <hr style="border: 0.5px solid #34495e; margin: 15px 0;">
+    <a href="/logout" style="color:#ff7675;">Logout</a>
+</div>
+
+<div class="main-content">
+    <div class="report-container">
+        <button onclick="window.print()" class="btn-print">🖨️ Print / Save PDF</button>
+        <h2 style="margin-top: 0;">Daily Movement & Stock Alerts</h2>
+        <p style="color: #666;"><strong>Date:</strong> {{ date }}</p>
+        
+        <table class="report-table">
+            <thead>
+                <tr>
+                    <th>Product Name</th>
+                    <th>Sold Today</th>
+                    <th>Current Stock</th>
+                    <th>Status</th>
+                    <th style="text-align: right;">Revenue</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in items %}
+                <tr class="{{ 'stock-critical' if item.quantity <= item.min_stock_level else '' }}">
+                    <td><strong>{{ item.name }}</strong></td>
+                    <td>{{ item.total_sold or 0 }}</td>
+                    <td>{{ item.quantity }}</td>
+                    <td>
+                        {% if item.quantity <= item.min_stock_level %}
+                            <span class="badge-reorder">REORDER NOW</span>
+                        {% else %}
+                            <span class="badge-ok">✓ OK</span>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: right; font-weight: bold;">
+                        {{ shop.currency }} {{ "{:,.2f}".format(item.revenue or 0) }}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
 </div>
